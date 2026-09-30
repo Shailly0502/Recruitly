@@ -59,7 +59,7 @@ Syntax:
 DURATION is a number and a unit with no space: 12h, 7d, 2w.
 DATE is one of: today, yesterday, a weekday name (the most recent one, counting today),
 a date as DD-MM-YYYY, or a DURATION meaning that long ago (reached:offer>=30d).
-There are no spaces inside a term.
+There are no spaces inside a term. Prefer the simplest query that answers the question.
 
 Examples:
   who is in interview right now?                      -> stage:interview
@@ -68,11 +68,15 @@ Examples:
   who reached offer but didn't get hired?             -> reached:offer -stage:hired
   everyone except rejected candidates                 -> -stage:rejected
   is priya in interview or offer?                     -> (stage:interview OR stage:offer) priya
+  who never made it to interview?                     -> -reached:interview
+  who reached screening before monday?                -> reached:screening<monday
   who got hired in the last 30 days?                  -> reached:hired>=30d
   who was rejected yesterday?                         -> reached:rejected=yesterday
+  who is in offer, or has waited over 2 weeks anywhere -> stage:offer OR for:>14d
   JOB-001 applicants still waiting in applied         -> job:JOB-001 stage:applied
 
-If the question cannot be expressed in this syntax, reply with exactly {UNSUPPORTED}."""
+If the question is not about finding candidates by name, stage, time in stage, when they
+reached a stage, or job, reply with exactly {UNSUPPORTED}."""
 
 
 def translate(client, question: str, today: datetime, failed: tuple[str, str] | None = None) -> str:

@@ -1,5 +1,5 @@
 """Search eval: 30 questions with expected queries. A translation is correct if
-it returns the same candidates as the expected query.
+the filters it produces return the same candidates as the expected query.
 
     python -m evals.search_eval
 """
@@ -11,7 +11,8 @@ from app import seed
 from app.config import IST
 from app.ai import assist, questions
 from app.resumes import ResumeStorage
-from app.search import parser, run
+from app.search import Filters, parser, run
+from app.search import filters as portal_filters
 from app.store import Store, utcnow
 
 from . import real_ai
@@ -30,7 +31,7 @@ QUESTIONS = [
     ("who has been in offer for over two weeks", "stage:offer for:>2w"),
     ("who is in interview or offer", "stage:interview OR stage:offer"),
     ("is anyone named priya in interview or offer?", "(stage:interview OR stage:offer) priya"),
-    ("who entered screening today?", "reached:screening=today"),
+    ("who entered screening today?", "reached:screening>=today"),
     ("who was rejected in the last 10 days", "reached:rejected>=10d"),
     ("who reached interview before monday", "reached:interview<monday"),
     ("people who never made it to interview", "-reached:interview"),
@@ -62,17 +63,20 @@ def main() -> None:
     def found(query: str) -> set[str]:
         return {match.candidate.name for match in run(parser.parse(query, now), candidates, now).matches}
 
+    def found_by(filters: Filters) -> set[str]:
+        return {match.candidate.name for match in portal_filters.search(filters, candidates, now).matches}
+
     correct = run_automatically = suggested = 0
     for question, expected in QUESTIONS:
-        outcome = assist.assist(ai, question, candidates, now)
-        ok = outcome.query is not None and found(outcome.query) == found(expected)
+        outcome = assist.assist(ai, question, Filters(), candidates, now)
+        ok = outcome.filters is not None and found_by(outcome.filters) == found(expected)
         correct += ok
         run_automatically += outcome.path == assist.INTERPRETED
         suggested += outcome.path == assist.SUGGESTION
         confidence = "" if outcome.confidence is None else f" p={outcome.confidence:.2f}"
         print(f"{'ok  ' if ok else 'MISS'} {outcome.path:<15}{confidence:<8} {question}")
         if not ok:
-            print(f"       expected {expected!r}, got {outcome.query!r}")
+            print(f"       expected {expected!r}, got {outcome.query!r} -> {outcome.filters}")
 
     total = len(QUESTIONS)
     print(f"\nCorrect: {correct}/{total} ({correct / total:.0%})")

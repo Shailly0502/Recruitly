@@ -1,15 +1,5 @@
 "use strict";
 
-const EXAMPLES = [
-  ["sharam", "Find Priya Sharma, even with a typo"],
-  ["stage:interview", "Who's in Interview right now?"],
-  ["stage:screening for:>7d", "Stuck in Screening for more than a week"],
-  ["reached:interview>=monday", "Moved to Interview since Monday"],
-  ["reached:offer -stage:hired", "Reached Offer but didn't get hired"],
-  ["-stage:rejected", "Everyone except rejected candidates"],
-  ["(stage:interview OR stage:offer) priya", "Combined: Priya, if she is in Interview or Offer"],
-  ["job:JOB-001 stage:applied", "Applicants for one job who are still in Applied"],
-];
 const WAITING_DAYS = 7; // highlight candidates waiting this long
 const RATING_POLL_MS = 2000;
 const CATEGORY_LABELS = { skills: "Skills", experience: "Experience", relevance: "Role relevance", budget: "Budget fit" };
@@ -47,7 +37,6 @@ async function api(path, options = {}) {
   if (!response.ok) {
     const error = new Error(body?.message || `Something went wrong (${response.status}).`);
     error.code = body?.error;
-    error.position = body?.position;
     throw error;
   }
   return body;
@@ -128,6 +117,18 @@ async function loadAudit() {
 
 /* ---- search ---- */
 
+// The search box is a name search. Everything else is a filter from the Filters panel.
+// On Enter, with AI on, a question typed in the box is turned into filters.
+
+const NO_FILTERS = {
+  stages: [], exclude: [], min_days: null, max_days: null, reached: null, reached_when: "since", reached_date: null,
+  not_reached: null, job: null,
+  advanced: "", // conditions from a question that no menu can hold; shown as a chip in plain English
+};
+state.filters = { ...NO_FILTERS };
+state.advancedLabel = null;
+const WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+
 let searchTimer;
 
 function onSearchInput() {
@@ -135,30 +136,46 @@ function onSearchInput() {
   searchTimer = setTimeout(runSearch, 250);
 }
 
+function hasFilters(filters = state.filters) {
+  return Object.entries(filters).some(([key, value]) =>
+    key !== "reached_when" && (Array.isArray(value) ? value.length : value != null && value !== ""));
+}
+
+function searchParams() {
+  const params = new URLSearchParams();
+  const name = $("search").value.trim();
+  if (name) params.append("name", name);
+  for (const [key, value] of Object.entries(state.filters)) {
+    if (Array.isArray(value)) value.forEach((item) => params.append(key, item));
+    else if (value != null && value !== "") params.append(key, value);
+  }
+  params.append("tz_offset", new Date().getTimezoneOffset());
+  return params;
+}
+
 // As-you-type search. Never uses AI.
 async function runSearch() {
-  const query = $("search").value.trim();
   const run = ++state.searchRun;
   showAssist(null);
-  if (!query) {
+  renderChips();
+  if (!$("search").value.trim() && !hasFilters()) {
     showSearchError(null);
     $("results").hidden = true;
     $("board").hidden = false;
     return;
   }
-  const params = new URLSearchParams({ q: query });
   try {
-    const found = await api(`/api/search?${params}`);
+    const found = await api(`/api/search?${searchParams()}`);
     if (run !== state.searchRun) return; // a newer search has started
     showSearchError(null);
     renderResults(found);
   } catch (error) {
     if (run !== state.searchRun) return;
-    showSearchError(error, query);
+    showSearchError(error);
   }
 }
 
-// On Enter. The server only uses AI if the input doesn't parse or matches nobody.
+// On Enter. The server only uses AI if the typed words match no candidate's name.
 async function runAssist() {
   const text = $("search").value.trim();
   if (!text || !state.ai.search) return runSearch();
@@ -166,13 +183,25 @@ async function runAssist() {
   showAssist(el("span", { class: "muted" }, "Working out what you meant…"));
   let answer;
   try {
-    answer = await api("/api/assist", { method: "POST", body: { text } });
+    answer = await api("/api/assist", {
+      method: "POST",
+      body: { text, filters: state.filters, tz_offset: new Date().getTimezoneOffset() },
+    });
   } catch {
     return runSearch(); // fall back to plain search
   }
   if (run !== state.searchRun) return;
 
-  showSearchError(answer.error, text);
+  showSearchError(answer.error);
+  if (answer.path === "interpreted") {
+    useFilters(answer.filters);
+    renderResults(answer);
+    showAssist(
+      el("div", {}, answer.message),
+      el("div", { class: "assist-actions" },
+        el("button", { class: "link", type: "button", onclick: openFilters }, "Adjust these filters")));
+    return;
+  }
   if (answer.results) {
     renderResults(answer);
   } else if (!answer.error) {
@@ -180,30 +209,27 @@ async function runAssist() {
     $("results").hidden = true;
     $("board").hidden = false;
   }
-  if (answer.path === "interpreted") {
+  if (answer.path === "suggestion") {
     showAssist(
       el("div", {}, answer.message),
-      el("div", { class: "assist-query" }, el("code", {}, answer.query),
-        el("button", { class: "link", type: "button", onclick: () => useQuery(answer.query) }, "Edit this query")));
-  } else if (answer.path === "suggestion") {
-    showAssist(
-      el("div", {}, answer.message),
-      el("div", {}, answer.description),
-      el("div", { class: "assist-query" }, el("code", {}, answer.query),
-        el("button", { class: "button primary", type: "button", onclick: () => useQuery(answer.query, true) },
-          "Run this search"),
-        el("button", { class: "button", type: "button", onclick: () => useQuery(answer.query) }, "Edit it")));
-  } else if (answer.message) {
-    showAssist(el("div", {}, answer.message));
+      el("div", { class: "assist-description" }, answer.description),
+      el("div", { class: "assist-actions" },
+        el("button", { class: "button primary", type: "button",
+          onclick: () => { useFilters(answer.filters); runSearch(); } }, "Apply these filters"),
+        el("button", { class: "button", type: "button",
+          onclick: () => { setPanel(answer.filters); openFilters(); } }, "Adjust them first")));
   } else {
-    showAssist(null);
+    showAssist(answer.message ? el("div", {}, answer.message) : null);
   }
 }
 
-function useQuery(query, run = false) {
-  $("search").value = query;
-  $("search").focus();
-  if (run) runSearch(); else showAssist(null);
+// Filters from the AI replace the current ones; its name words go in the search box.
+function useFilters(filters) {
+  const { name, ...rest } = filters;
+  $("search").value = name || "";
+  state.filters = { ...NO_FILTERS, ...rest };
+  setPanel(state.filters);
+  renderChips();
 }
 
 function showAssist(...children) {
@@ -212,23 +238,23 @@ function showAssist(...children) {
   $("assist").replaceChildren(...parts);
 }
 
-// Parser error with a caret under the problem. Previous results stay visible.
-function showSearchError(error, query) {
+// Why the search can't run. Previous results stay visible.
+function showSearchError(error) {
   const box = $("search-error");
   $("search").classList.toggle("invalid", Boolean(error));
   box.hidden = !error;
-  if (!error) return;
-  const code = error.code || error.error;
-  box.replaceChildren(
-    ...(code === "invalid_query" && Number.isInteger(error.position)
-      ? [el("pre", {}, `${query}\n${" ".repeat(error.position)}^`)] : []),
-    el("div", {}, error.message));
+  if (error) box.replaceChildren(el("div", {}, error.message));
 }
 
 function renderResults(found) {
+  state.advancedLabel = found.advanced_description ?? state.advancedLabel;
+  renderChips();
   const heading = found.count === 1 ? "1 candidate" : `${found.count} candidates`;
   $("results").replaceChildren(...[
     el("h2", {}, found.count ? heading : "No matches"),
+    // Exactly what was searched, so she never has to guess.
+    found.description ? el("p", { class: "searching" }, found.description.replace(/^Candidates who/, "Showing candidates who"))
+      : null,
     found.explanation ? el("p", { class: "explanation" }, found.explanation) : null,
     ...found.results.map((candidate) =>
       el("button", { class: "card", type: "button", onclick: () => openPanel(candidate.id) },
@@ -242,17 +268,7 @@ function renderResults(found) {
   $("board").hidden = true;
 }
 
-function renderExamples() {
-  $("examples").replaceChildren(...EXAMPLES.map(([query, meaning]) =>
-    el("li", {},
-      el("button", { type: "button", onclick: () => { $("search").value = query; runSearch(); $("search").focus(); } },
-        query),
-      el("span", {}, meaning))));
-}
-
 /* ---- filters ---- */
-
-// Apply writes a query into the search box and runs it.
 
 function renderFilters() {
   for (const id of ["f-stage", "f-exclude"]) {
@@ -261,6 +277,7 @@ function renderFilters() {
     $(id).addEventListener("change", () => updateMultiLabel(id));
   }
   $("f-reached").append(...state.stages.map((stage) => el("option", { value: stage.key }, stage.label)));
+  $("f-never").append(...state.stages.map((stage) => el("option", { value: stage.key }, stage.label)));
   $("f-job").append(...state.jobs.map((job) => el("option", { value: job.id }, `${job.id} · ${job.title}`)));
   $("job-ids").replaceChildren(...state.jobs.map((job) => el("option", { value: job.id }, job.title)));
 }
@@ -275,39 +292,135 @@ function updateMultiLabel(id) {
   $(id).querySelector("summary").textContent = labels.length ? labels.join(", ") : none;
 }
 
-function filtersToQuery() {
-  const parts = [];
-  const name = $("f-name").value.trim();
-  if (name) parts.push(name);
-  if ($("f-job").value) parts.push(`job:${$("f-job").value}`);
+// The panel's controls as filters.
+function readPanel() {
+  const time = $("f-for").value ? JSON.parse($("f-for").value) : {};
+  return {
+    ...NO_FILTERS,
+    stages: checked("f-stage"),
+    exclude: checked("f-exclude"),
+    min_days: time.min_days ?? null,
+    max_days: time.max_days ?? null,
+    reached: $("f-reached").value || null,
+    reached_when: $("f-when").value,
+    reached_date: ($("f-reached").value && $("f-date").value) || null,
+    not_reached: $("f-never").value || null,
+    job: $("f-job").value || null,
+    advanced: state.filters.advanced, // not editable in the panel; removed with its chip
+  };
+}
 
-  const stages = checked("f-stage").map((stage) => `stage:${stage}`);
-  if (stages.length === 1) parts.push(stages[0]);
-  if (stages.length > 1) parts.push(`(${stages.join(" OR ")})`);
-
-  parts.push(...checked("f-exclude").map((stage) => `-stage:${stage}`));
-  if ($("f-for").value) parts.push(`for:${$("f-for").value}`);
-  if ($("f-reached").value) {
-    const since = $("f-since").value;
-    parts.push(`reached:${$("f-reached").value}${since ? `>=${since}` : ""}`);
+// Shows `filters` in the panel, adding options the dropdowns don't have (e.g. from the AI).
+function setPanel(filters) {
+  for (const [id, values] of [["f-stage", filters.stages || []], ["f-exclude", filters.exclude || []]]) {
+    $(id).querySelectorAll("input").forEach((box) => { box.checked = values.includes(box.value); });
+    updateMultiLabel(id);
   }
-  return parts.join(" ");
+  const time = {};
+  if (filters.min_days != null) time.min_days = filters.min_days;
+  if (filters.max_days != null) time.max_days = filters.max_days;
+  selectValue("f-for", Object.keys(time).length ? JSON.stringify(time) : "", timeLabel(time));
+  selectValue("f-job", filters.job || "", filters.job);
+  $("f-reached").value = filters.reached || "";
+  $("f-when").value = filters.reached_when || "since";
+  selectValue("f-date", filters.reached_date || "", dayLabel(filters.reached_date));
+  $("f-never").value = filters.not_reached || "";
+  enableWhen();
+}
+
+function selectValue(id, value, label) {
+  const select = $(id);
+  if (value && ![...select.options].some((option) => option.value === value)) {
+    select.append(el("option", { value }, label));
+  }
+  select.value = value;
+}
+
+function days(count) {
+  return count === 1 ? "1 day" : `${count} days`;
+}
+
+function timeLabel(time) {
+  if (time.min_days != null && time.max_days != null) return `${days(time.min_days)} to ${days(time.max_days)}`;
+  if (time.min_days != null) return `More than ${days(time.min_days)}`;
+  if (time.max_days != null) return `Less than ${days(time.max_days)}`;
+  return "Any";
+}
+
+function enableWhen() {
+  const reached = Boolean($("f-reached").value);
+  $("f-when").disabled = !reached;
+  $("f-date").disabled = !reached;
+}
+
+// "today", "monday", "7d" (ago), "2026-09-01" -> words.
+function dayLabel(day) {
+  if (!day) return "Any time";
+  const option = [...$("f-date").options].find((item) => item.value === day);
+  if (option) return option.textContent;
+  if (WEEKDAYS.includes(day)) return day[0].toUpperCase() + day.slice(1);
+  const ago = day.match(/^(\d+)([dh])$/);
+  if (ago) return `${ago[1]} ${ago[2] === "d" ? "days" : "hours"} ago`;
+  const date = new Date(`${day}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? day
+    : date.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+
+// One removable chip per active filter, so she can see what's applied with the panel closed.
+function renderChips() {
+  const filters = state.filters;
+  const stageList = (keys) => keys.map(labelOf).join(", ");
+  const chips = [];
+  if (filters.stages.length) chips.push([`Stage: ${stageList(filters.stages)}`, { stages: [] }]);
+  if (filters.exclude.length) chips.push([`Excluding: ${stageList(filters.exclude)}`, { exclude: [] }]);
+  if (filters.min_days != null || filters.max_days != null) {
+    chips.push([`In stage: ${timeLabel(filters).toLowerCase()}`, { min_days: null, max_days: null }]);
+  }
+  if (filters.reached) {
+    const day = dayLabel(filters.reached_date);
+    const relative = /^(Today|Yesterday)$/.test(day);
+    const words = relative ? day.toLowerCase() : day;
+    // "reached Screening yesterday", not "on yesterday".
+    const when = !filters.reached_date ? "" : relative && filters.reached_when === "on" ? ` ${words}`
+      : ` ${filters.reached_when} ${words}`;
+    chips.push([`Reached ${labelOf(filters.reached)}${when}`, { reached: null, reached_when: "since", reached_date: null }]);
+  }
+  if (filters.not_reached) chips.push([`Never reached ${labelOf(filters.not_reached)}`, { not_reached: null }]);
+  if (filters.job) chips.push([`Job: ${filters.job}`, { job: null }]);
+  if (filters.advanced) {
+    chips.push([`Also: ${state.advancedLabel || "conditions from your question"}`, { advanced: "" }]);
+  }
+
+  $("active-filters").hidden = chips.length === 0;
+  $("filter-count").hidden = chips.length === 0;
+  $("filter-count").textContent = String(chips.length);
+  $("active-filters").replaceChildren(
+    ...chips.map(([label, cleared]) =>
+      el("span", { class: "chip" }, label,
+        el("button", {
+          type: "button", "aria-label": `Remove filter: ${label}`,
+          onclick: () => { state.filters = { ...state.filters, ...cleared }; setPanel(state.filters); runSearch(); },
+        }, "×"))),
+    chips.length > 1 ? el("button", { class: "link", type: "button", onclick: clearFilters }, "Clear all") : null);
+}
+
+function openFilters() {
+  $("filters").hidden = false;
+  $("filter-toggle").setAttribute("aria-expanded", "true");
 }
 
 function applyFilters(event) {
   event.preventDefault();
   closeMultis();
-  $("search").value = filtersToQuery();
+  state.filters = readPanel();
   clearTimeout(searchTimer);
   runSearch();
 }
 
 function clearFilters() {
   $("filters").reset();
-  $("f-since").disabled = true;
-  updateMultiLabel("f-stage");
-  updateMultiLabel("f-exclude");
-  $("search").value = "";
+  state.filters = { ...NO_FILTERS };
+  setPanel(state.filters);
   runSearch();
 }
 
@@ -564,7 +677,7 @@ async function act(candidate, action, extra = {}) {
 
 async function refresh() {
   await loadBoard().catch(() => {});
-  if ($("search").value.trim()) await runSearch();
+  if ($("search").value.trim() || hasFilters()) await runSearch();
 }
 
 /* ---- add candidate ---- */
@@ -634,14 +747,15 @@ $("search").addEventListener("keydown", (event) => {
 });
 $("filter-toggle").addEventListener("click", () => {
   const open = $("filters").hidden;
+  if (open) setPanel(state.filters); // drop edits that weren't applied
   $("filters").hidden = !open;
   $("filter-toggle").setAttribute("aria-expanded", String(open));
 });
 $("filters").addEventListener("submit", applyFilters);
 $("f-clear").addEventListener("click", clearFilters);
 $("f-reached").addEventListener("change", () => {
-  $("f-since").disabled = !$("f-reached").value;
-  if (!$("f-reached").value) $("f-since").value = "";
+  enableWhen();
+  if (!$("f-reached").value) $("f-date").value = "";
 });
 document.addEventListener("click", (event) => closeMultis(event.target.closest?.(".multi")));
 $("add-button").addEventListener("click", openAddDialog);
@@ -655,14 +769,13 @@ document.addEventListener("keydown", (event) => {
 });
 
 async function start() {
-  renderExamples();
   // The board still loads if these fail.
   [state.jobs, state.ai] = await Promise.all([
     api("/api/jobs").catch(() => []),
     api("/api/ai/status").catch(() => state.ai),
   ]);
   if (state.ai.search) {
-    $("search").placeholder = "Search a name or filter, or ask a question and press Enter";
+    $("search").placeholder = "Search by name, or ask a question and press Enter";
   }
   try {
     await loadBoard();

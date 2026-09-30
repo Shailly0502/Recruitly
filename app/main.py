@@ -4,6 +4,8 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from typing import Annotated
+
 from fastapi import BackgroundTasks, FastAPI, File, Form, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
@@ -16,7 +18,8 @@ from .ai import rating
 from .jobs import Job
 from .resumes import InvalidResume, ResumeStorage
 from .resumes.render import MAX_BYTES
-from .search import QueryError, SearchResult, search
+from .search import FilterError, Filters, SearchResult, filters as portal_filters
+from .search.describe import describe
 from .store import Candidate, DuplicateJob, Store, utcnow
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
@@ -48,6 +51,13 @@ def _hits(result: SearchResult | None, now: datetime) -> list[dict] | None:
     ]
 
 
+def _described(filters: Filters | None, local: datetime) -> dict:
+    """The filters in plain English, and their `advanced` part alone."""
+    tree = portal_filters.to_tree(filters, local) if filters else None
+    return {"description": describe(tree, local) if tree else None,
+            "advanced_description": portal_filters.describe_advanced(filters, local) if filters else None}
+
+
 def create_app(db_path: str | Path | None = None, ai: ai_layer.AI | None = None) -> FastAPI:
     """`ai` overrides the AI clients; by default they're built from the environment."""
     store = Store(db_path or os.environ.get("RECRUITLY_DB", DEFAULT_DB))
@@ -76,9 +86,9 @@ def create_app(db_path: str | Path | None = None, ai: ai_layer.AI | None = None)
     async def duplicate_job(request: Request, exc: DuplicateJob):
         return _error(409, "duplicate_job", str(exc))
 
-    @app.exception_handler(QueryError)
-    async def invalid_query(request: Request, exc: QueryError):
-        return _error(400, "invalid_query", exc.message, exc.position)
+    @app.exception_handler(FilterError)
+    async def invalid_filter(request: Request, exc: FilterError):
+        return _error(400, "invalid_filter", exc.message)
 
     @app.exception_handler(pipeline.InvalidInput)
     async def invalid_input(request: Request, exc: pipeline.InvalidInput):
@@ -217,32 +227,32 @@ def create_app(db_path: str | Path | None = None, ai: ai_layer.AI | None = None)
     # ---- search ----
 
     @app.get("/api/search", response_model=schemas.SearchOut, responses=ERRORS)
-    def search_candidates(
-        q: str = Query(max_length=300),
-        tz_offset: int | None = Query(
-            default=None, ge=-900, le=900,
-            description="Minutes behind UTC, as JavaScript's getTimezoneOffset() reports it. "
-                        "Decides when 'monday' and 'today' begin. Defaults to IST.",
-        ),
-    ):
+    def search_candidates(params: Annotated[schemas.SearchIn, Query()]):
+        """Filtered, ranked candidates, or why nobody matched. Never uses AI."""
         now = utcnow()
-        result = search(q, store.candidates(), _local(now, tz_offset))
-        return {"query": q, "count": len(result.matches), "results": _hits(result, now),
+        local = _local(now, params.tz_offset)
+        filters = params.to_filters()
+        result = portal_filters.search(filters, store.candidates(), local)
+        return {**_described(filters, local), "count": len(result.matches), "results": _hits(result, now),
                 "explanation": result.explanation}
 
     @app.post("/api/assist", response_model=schemas.AssistOut, responses=ERRORS)
     def assist(body: schemas.AssistIn):
-        """Search that also accepts plain English. Same as /api/search without AI."""
+        """Search box text on Enter: a name search, or a plain-English question turned into
+        filters when AI is on. Same as /api/search without AI."""
         now = utcnow()
-        outcome = assist_flow.assist(ai, body.text, store.candidates(), _local(now, body.tz_offset))
+        local = _local(now, body.tz_offset)
+        outcome = assist_flow.assist(ai, body.text, body.filters.to_filters(), store.candidates(), local)
         error = outcome.error
+        # A suggestion hasn't run: describe what it would search. Otherwise what did run.
+        described = _described(outcome.filters if outcome.path == assist_flow.SUGGESTION else outcome.ran, local)
         return {
             "path": outcome.path,
             "message": outcome.message,
-            "query": outcome.query,
-            "description": outcome.description,
+            "filters": outcome.filters.to_dict() if outcome.filters else None,
+            **described,
             "confidence": None if outcome.confidence is None else round(outcome.confidence, 3),
-            "error": {"error": "invalid_query", "message": error.message, "position": error.position} if error else None,
+            "error": {"error": "invalid_filter", "message": error.message} if error else None,
             "count": len(outcome.result.matches) if outcome.result else 0,
             "results": _hits(outcome.result, now),
             "explanation": outcome.result.explanation if outcome.result else None,

@@ -36,7 +36,7 @@ class JevClient:
 
 @dataclass(frozen=True)
 class Route:
-    kind: str        # query_typo | candidate_name | english_question | off_topic | unclear
+    kind: str        # candidate_name | english_question | off_topic | unclear
     on_topic: float  # P(input is about candidates)
 
 

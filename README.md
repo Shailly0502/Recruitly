@@ -2,15 +2,15 @@
 
 A lightweight applicant tracking system for running a hiring pipeline.
 
-Candidates move through **Applied → Screening → Interview → Offer → Hired** and can be rejected at any point before they're hired. Recruitly keeps a tamper-evident history of every move, and has a single search box that handles typos, time-based filters and combined queries.
+Candidates move through **Applied → Screening → Interview → Offer → Hired** and can be rejected at any point before they're hired. Recruitly keeps a tamper-evident history of every move, and has a typo-tolerant name search with ordinary filters for stage, time in stage, date reached and job.
 
 ## Features
 
 - **Pipeline board**: everyone grouped by current stage, with how long they've been there
 - **Strict stage rules**: one step forward at a time, and Hired/Rejected are final, enforced by the server
 - **Audit trail**: every action is an append-only event, hash-chained so edits to the database file are detected
-- **Search**: fuzzy name matching, filters by stage, time in stage, date reached, job, and negation
-- **Helpful errors**: a bad query tells you what's wrong and points at it, instead of returning nothing
+- **Search**: fuzzy name matching, plus filters for stage, excluded stages, time in stage, date reached and job
+- **Helpful empty results**: when nothing matches, you're told which filter ruled everyone out
 - **Jobs and resumes**: applications are tied to a job, and resumes are shown as page images only
 - **Plain-English search** (optional): type a question like "who's been stuck in screening for a week?"
 - **Candidate rating** (optional): scores a candidate against the job's requirements, with the evidence shown
@@ -48,40 +48,30 @@ DEEPSEEK_API_KEY=your-key
 TYPESAFE_API_KEY=your-key
 ```
 
-You need both keys. Without them the features are simply hidden. Set `RECRUITLY_AI=off` to disable them while keeping the keys. The APIs are only called when you press Enter on a search the parser can't read, or click **Create candidate rating** on a profile.
+You need both keys. Without them the features are simply hidden. Set `RECRUITLY_AI=off` to disable them while keeping the keys. The APIs are only called when you press Enter on search text that matches no candidate's name, or click **Create candidate rating** on a profile.
 
 ## Usage
 
-### Search syntax
+### Search
 
-Plain words search names, and typos are fine. Everything else is a filter.
+The search box finds candidates by name, and typos are fine. Everything else is a filter: click **Filters**, choose, and press **Apply**. Applied filters show as chips under the search box; click × on a chip to remove it.
 
-| What you want | Query |
+| What you want | How |
 | --- | --- |
-| Find Priya Sharma (misspelled) | `sharam` |
-| Who's in Interview right now | `stage:interview` |
-| Stuck in Screening for over a week | `stage:screening for:>7d` |
-| Moved to Interview since Monday | `reached:interview>=monday` |
-| Reached Offer but not hired | `reached:offer -stage:hired` |
-| Everyone except rejected | `-stage:rejected` |
-| Applicants for a job | `job:JOB-001` |
-| Combined | `(stage:interview OR stage:offer) priya` |
+| Find Priya Sharma (misspelled) | Type `sharam` in the search box |
+| Who's in Interview right now | Current stage: Interview |
+| Stuck in Screening for over a week | Current stage: Screening, Time in current stage: More than a week |
+| Moved to Interview since Monday | Reached stage: Interview, When: Since Monday |
+| Reached Screening before Monday, or on one day | Reached stage: Screening, When: Before Monday (or On Yesterday) |
+| Never made it to Interview | Never reached: Interview |
+| Reached Offer but not hired | Reached stage: Offer, Exclude stage: Hired |
+| Everyone except rejected | Exclude stage: Rejected |
+| Applicants for a job | Job: JOB-001 |
+| Combined | Type `priya`, and choose Current stage: Interview and Offer |
 
-- Terms are combined with a space (AND), `OR`, `-` or `NOT`, and parentheses.
-- Dates: `today`, `yesterday`, a weekday, `28-09-2026` (or `28/09/2026`, `2026-09-28`), or a relative time like `3d`.
-- Durations: `12h`, `7d`, `2w`.
+Filters combine with each other and with the name. Above the results, a line always says exactly what's being searched ("Showing candidates who are currently in Screening and have been…"). Name matches rank first, then the most recent move for a "since" filter, otherwise the longest time in stage.
 
-If you'd rather not type filters, **Apply Filters** has dropdowns that build the query for you.
-
-When something doesn't parse, you get a pointer to the problem:
-
-```
-stage:screening for:>banana
-                     ^
-'banana' isn't a duration. Use a number and a unit, like 12h, 7d or 2w.
-```
-
-If a valid query matches nobody, it tells you which part ruled everyone out.
+When nothing matches, you're told why, for example *"Only 1 candidate is currently in Offer, and it's not someone who has been in their current stage for less than 1 day."* or *"Nobody has applied for JOB-002."* Filters that can't work together are caught before searching (*"You chose Hired as the current stage but also excluded it, so nobody can match."*). A question typed into the name box gets pointed at the right filter.
 
 ### Jobs
 
@@ -89,9 +79,11 @@ The **Job portal** page lists every job as a plain table. Fill in the empty bott
 
 ### Plain-English search
 
-Typing a question and pressing Enter sends it through a small pipeline. Jev decides whether it's a question at all. DeepSeek turns it into a query. The parser validates it, the app describes it back in plain English, and Jev checks that the description matches the question. Confident translations run and show "Interpreted as: ...". Less confident ones are offered as a suggestion you can run or edit.
+Typing a question and pressing Enter sends it through a small pipeline. Jev decides whether it's a question at all. DeepSeek translates it, the app checks the translation and turns it into the portal's filters, describes those filters back in plain English, and Jev checks that the description matches the question. Confident translations fill in the filters and run, showing "Interpreted as: ...". Less confident ones are offered as filters you can apply or adjust first.
 
-Normal queries and name searches never go through this and run as you type.
+Any valid question runs. The parts that fit a menu fill in the Filters panel. Anything no menu can hold, like "in Offer **or** waiting over two weeks", is kept as an extra condition and shown as its own chip in plain English ("Also: are currently in Offer or have been in their current stage for more than 14 days"), which you can remove like any other filter.
+
+Name searches never go through this and run as you type.
 
 ### Candidate rating
 
@@ -113,7 +105,7 @@ app/
   stages.py        stage rules
   pipeline.py      add / advance / reject / record rating
   store.py         SQLite event store and jobs table
-  search/          lexer, parser, evaluation, fuzzy matching
+  search/          filters, evaluation and explanations, fuzzy matching (plus the internal query parser)
   resumes/         PDF storage, text extraction, page rendering
   ai/              plain-English search and candidate rating
 static/            frontend (index.html, jobs.html, app.js, styles.css)
@@ -135,8 +127,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design: diagrams, 
 | GET | `/api/candidates/{id}/resume/pages/{n}` | A resume page as an image |
 | GET / POST | `/api/candidates/{id}/rating` | Get or create a rating |
 | GET / POST | `/api/jobs` | List or add jobs |
-| GET | `/api/search?q=...` | Search |
-| POST | `/api/assist` | Search that also accepts a plain-English question |
+| GET | `/api/search?name=&stages=&exclude=&min_days=&max_days=&reached=&reached_when=&reached_date=&not_reached=&job=` | Search with filters |
+| POST | `/api/assist` | Search box text on Enter: a name, or a plain-English question turned into filters |
 | GET | `/api/audit/verify` | Check the history hasn't been tampered with |
 | POST | `/api/demo/seed` | Load demo data |
 
@@ -150,7 +142,7 @@ Errors always come back as `{error, message, position}` with a 400, 404 or 409. 
 
 **Moves carry the stage you saw.** Every advance or reject sends the stage the screen was showing. If the candidate has already moved (say, from a double click), the request is refused rather than skipping a stage.
 
-**A query language instead of free text.** A small grammar is predictable, fast and can explain its own errors. Plain-English search is layered on top and always shows you the query it ran.
+**Filters, not a query language.** Recruiters pick from menus instead of learning syntax. Underneath, the filters become a small query tree that does the matching, ranking and explaining. Plain-English search produces the same filters, so she can always see and adjust what ran.
 
 **Separate models for writing and judging.** DeepSeek writes queries and extracts facts. Jev checks translations and scores categories. Neither one's output reaches the screen without being checked by something else.
 

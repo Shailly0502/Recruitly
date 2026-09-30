@@ -5,11 +5,11 @@ OFF_TOPIC = (
     "\"who has been in screening for more than a week?\""
 )
 UNCLEAR = (
-    "I couldn't tell what you're looking for. Try a candidate's name, a filter such as "
-    "stage:screening, or a question about candidates."
+    "I couldn't tell what you're looking for. Try a candidate's name, a question about "
+    "candidates, or choose what you need under Filters."
 )
-COULD_NOT_INTERPRET = "I couldn't turn that into a search."
-LOW_CONFIDENCE = "I'm not sure this is what you meant. Run it as it is, or edit it first."
+COULD_NOT_INTERPRET = "I couldn't turn that into a search. Try rephrasing it, or choose what you need under Filters."
+LOW_CONFIDENCE = "I'm not sure this is what you meant. Apply these filters, or adjust them first."
 INTERPRETED = "Interpreted as: {description}"
 
 RATING_UNREADABLE = "Couldn't read text from this resume; rating unavailable"

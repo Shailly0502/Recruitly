@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from . import stages
 from .jobs import Job
+from .search import Filters
 from .store import ADDED, RATED, REJECTED, Candidate, Event
 
 Stage = Literal["applied", "screening", "interview", "offer", "hired", "rejected"]
@@ -34,8 +35,40 @@ class JobIn(BaseModel):
     work_mode: str = Field(default="", max_length=40)
 
 
+class FiltersIn(BaseModel):
+    """The portal's search filters. All optional; they combine with AND."""
+    name: str = Field(default="", max_length=300, description="Name words; typos are fine")
+    stages: list[Stage] = Field(default=[], max_length=6, description="Currently in any of these")
+    exclude: list[Stage] = Field(default=[], max_length=6, description="Not currently in any of these")
+    min_days: float | None = Field(default=None, gt=0, le=3650, description="In the current stage for more than")
+    max_days: float | None = Field(default=None, gt=0, le=3650, description="In the current stage for less than")
+    reached: Stage | None = Field(default=None, description="Entered this stage at some point")
+    reached_when: Literal["since", "before", "on"] = Field(default="since", description="...since, before or on")
+    reached_date: str | None = Field(default=None, max_length=20,
+                                     description="...this day: today, yesterday, a weekday, YYYY-MM-DD, or 3d (ago)")
+    not_reached: Stage | None = Field(default=None, description="Never entered this stage")
+    job: str | None = Field(default=None, max_length=40)
+    advanced: str = Field(default="", max_length=300,
+                          description="Conditions from a plain-English question that no filter menu can hold")
+
+    def to_filters(self) -> Filters:
+        return Filters(name=self.name, stages=tuple(self.stages), exclude=tuple(self.exclude),
+                       min_days=self.min_days, max_days=self.max_days, reached=self.reached,
+                       reached_when=self.reached_when, reached_date=self.reached_date or None,
+                       not_reached=self.not_reached, job=self.job or None, advanced=self.advanced)
+
+
+class SearchIn(FiltersIn):
+    tz_offset: int | None = Field(
+        default=None, ge=-900, le=900,
+        description="Minutes behind UTC, as JavaScript's getTimezoneOffset() reports it. "
+                    "Decides when 'monday' and 'today' begin. Defaults to IST.",
+    )
+
+
 class AssistIn(BaseModel):
-    text: str = Field(max_length=300)
+    text: str = Field(max_length=300, description="What was typed in the search box")
+    filters: FiltersIn = Field(default_factory=FiltersIn, description="Filters already applied")
     tz_offset: int | None = Field(default=None, ge=-900, le=900)
 
 
@@ -119,8 +152,23 @@ class SearchHitOut(CandidateOut):
     score: float | None
 
 
+class FiltersOut(BaseModel):
+    name: str
+    stages: list[str]
+    exclude: list[str]
+    min_days: float | None
+    max_days: float | None
+    reached: str | None
+    reached_when: str
+    reached_date: str | None
+    not_reached: str | None
+    job: str | None
+    advanced: str
+
+
 class SearchOut(BaseModel):
-    query: str
+    description: str | None     # the filters in plain English
+    advanced_description: str | None  # the `advanced` conditions alone, for their chip
     count: int
     results: list[SearchHitOut]
     explanation: str | None
@@ -129,10 +177,11 @@ class SearchOut(BaseModel):
 class AssistOut(BaseModel):
     path: str                   # see ai/assist.py
     message: str | None
-    query: str | None           # query run or suggested
-    description: str | None     # that query in plain English
+    filters: FiltersOut | None  # filters applied or suggested
+    description: str | None     # those filters in plain English
+    advanced_description: str | None  # the `advanced` conditions of the search run, for their chip
     confidence: float | None
-    error: ErrorOut | None      # parser error for the input
+    error: ErrorOut | None      # why the typed name search can't run
     count: int
     results: list[SearchHitOut] | None  # None when nothing was run
     explanation: str | None

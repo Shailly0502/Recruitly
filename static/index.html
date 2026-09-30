@@ -19,19 +19,17 @@
     <section class="search" aria-label="Search candidates">
       <div class="search-row">
         <input id="search" type="search" autocomplete="off" spellcheck="false"
-               placeholder="Search a name, or filter: stage:screening for:>7d"
-               aria-label="Search candidates" aria-describedby="search-error">
+               placeholder="Search by name (typos are fine)"
+               aria-label="Search candidates by name" aria-describedby="search-error">
         <button id="filter-toggle" class="button" type="button" aria-expanded="false" aria-controls="filters">
-          Apply Filters
+          Filters<span id="filter-count" class="count" hidden></span>
         </button>
       </div>
+      <div id="active-filters" class="chips" aria-label="Active filters" hidden></div>
       <div id="search-error" class="query-error" role="alert" hidden></div>
       <div id="assist" class="assist" aria-live="polite" hidden></div>
       <form id="filters" class="filters" hidden>
         <div class="filter-grid">
-          <label class="field">Name
-            <input id="f-name" autocomplete="off" spellcheck="false" placeholder="Typos are fine">
-          </label>
           <div class="field">Current stage
             <details id="f-stage" class="multi"><summary>Any stage</summary><div class="options"></div></details>
           </div>
@@ -41,12 +39,12 @@
           <label class="field">Time in current stage
             <select id="f-for">
               <option value="">Any</option>
-              <option value="<1d">Less than a day</option>
-              <option value="<7d">Less than a week</option>
-              <option value=">3d">More than 3 days</option>
-              <option value=">7d">More than a week</option>
-              <option value=">14d">More than 2 weeks</option>
-              <option value=">30d">More than 30 days</option>
+              <option value='{"max_days":1}'>Less than a day</option>
+              <option value='{"max_days":7}'>Less than a week</option>
+              <option value='{"min_days":3}'>More than 3 days</option>
+              <option value='{"min_days":7}'>More than a week</option>
+              <option value='{"min_days":14}'>More than 2 weeks</option>
+              <option value='{"min_days":30}'>More than 30 days</option>
             </select>
           </label>
           <label class="field">Job
@@ -55,30 +53,31 @@
           <label class="field">Reached stage
             <select id="f-reached"><option value="">Any</option></select>
           </label>
-          <label class="field">Reached it since
-            <select id="f-since" disabled>
-              <option value="">Any time</option>
-              <option value="today">Today</option>
-              <option value="yesterday">Yesterday</option>
-              <option value="monday">Monday</option>
-              <option value="7d">The last 7 days</option>
-              <option value="30d">The last 30 days</option>
-            </select>
+          <div class="field">When
+            <div class="field-pair">
+              <select id="f-when" aria-label="Reached it since, before or on" disabled>
+                <option value="since">Since</option>
+                <option value="before">Before</option>
+                <option value="on">On</option>
+              </select>
+              <select id="f-date" aria-label="Day" disabled>
+                <option value="">Any time</option>
+                <option value="today">Today</option>
+                <option value="yesterday">Yesterday</option>
+                <option value="monday">Monday</option>
+                <option value="7d">7 days ago</option>
+                <option value="30d">30 days ago</option>
+              </select>
+            </div>
+          </div>
+          <label class="field">Never reached
+            <select id="f-never"><option value="">Any</option></select>
           </label>
         </div>
         <div class="filter-actions">
           <button class="button primary" type="submit">Apply</button>
           <button id="f-clear" class="button" type="button">Clear all</button>
         </div>
-        <details class="syntax">
-          <summary>Or type a query in the search box</summary>
-          <ul id="examples" class="examples"></ul>
-          <p class="hint">
-            Combine with a space (and), <code>OR</code>, <code>-</code> (not) and parentheses.
-            Dates can be a weekday, <code>today</code>, <code>yesterday</code>, <code>28-09-2026</code>
-            or how long ago (<code>3d</code>). Durations use <code>h</code>, <code>d</code> or <code>w</code>.
-          </p>
-        </details>
       </form>
     </section>
 

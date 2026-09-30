@@ -68,7 +68,6 @@ main { padding: 16px 20px 8px; }
   flex: 1 1 280px;
   min-width: 0;
   font: inherit;
-  font-family: var(--mono);
   padding: 9px 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -86,13 +85,45 @@ main { padding: 16px 20px 8px; }
   background: var(--bad-ground);
   color: var(--bad);
 }
-.query-error pre {
-  margin: 0 0 6px;
-  font-family: var(--mono);
-  font-size: 13px;
-  color: var(--ink);
-  overflow-x: auto;
+
+#filter-toggle { display: inline-flex; align-items: center; gap: 6px; }
+#filter-toggle .count {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
 }
+
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 13px;
+}
+.chip button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.chip button:hover { background: var(--ground); color: var(--ink); }
+.chips .link { font-size: 13px; margin-left: 4px; }
 
 .filters {
   margin-top: 8px;
@@ -103,7 +134,7 @@ main { padding: 16px 20px 8px; }
 }
 .filter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
 .field { display: grid; gap: 4px; align-content: start; color: var(--muted); font-size: 13px; }
-.field > input, .field > select, .multi summary {
+.field > input, .field > select, .field-pair select, .multi summary {
   font: inherit;
   font-size: 15px;
   width: 100%;
@@ -114,7 +145,8 @@ main { padding: 16px 20px 8px; }
   background: var(--surface);
   color: var(--ink);
 }
-.field > select:disabled { background: var(--ground); color: var(--muted); }
+.field > select:disabled, .field-pair select:disabled { background: var(--ground); color: var(--muted); }
+.field-pair { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr); gap: 6px; }
 
 /* multi-select dropdown */
 .multi { position: relative; }
@@ -155,22 +187,6 @@ main { padding: 16px 20px 8px; }
 .multi label:hover { background: var(--ground); }
 
 .filter-actions { display: flex; gap: 8px; margin-top: 12px; }
-.syntax { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
-.syntax summary { color: var(--muted); font-size: 13px; cursor: pointer; }
-.examples { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 6px; }
-.examples li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
-.examples button {
-  font-family: var(--mono);
-  font-size: 13px;
-  padding: 3px 8px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--ground);
-  color: var(--accent);
-  cursor: pointer;
-}
-.examples button:hover { border-color: var(--accent); }
-.examples span, .hint { color: var(--muted); font-size: 13px; }
 
 /* ---- board ---- */
 .board {
@@ -350,8 +366,9 @@ main { padding: 16px 20px 8px; }
   display: grid;
   gap: 6px;
 }
-.assist-query { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.assist-query code { padding: 2px 8px; border-radius: 6px; background: var(--ground); overflow-wrap: anywhere; }
+.assist-description { color: var(--muted); }
+.searching { margin: -4px 0 10px; color: var(--muted); font-size: 13px; }
+.assist-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .link { font: inherit; padding: 0; border: 0; background: none; color: var(--accent); text-decoration: underline; cursor: pointer; }
 .muted { color: var(--muted); font-size: 13px; }
 

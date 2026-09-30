@@ -1,6 +1,6 @@
 # Recruitly architecture
 
-Recruitly helps a recruiter run a hiring pipeline. Candidates move through **Applied → Screening → Interview → Offer → Hired**, and can be rejected at any point before being hired. The portal shows everyone grouped by stage, keeps a history that can never be altered, and offers a single search box that handles typos, time-based filters and combined queries.
+Recruitly helps a recruiter run a hiring pipeline. Candidates move through **Applied → Screening → Interview → Offer → Hired**, and can be rejected at any point before being hired. The portal shows everyone grouped by stage, keeps a history that can never be altered, and offers a typo-tolerant name search with filters for stage, time in stage, when a stage was reached (or never reached) and job.
 
 The core is built without AI. Every requirement is met with deterministic code, so it runs with no API keys and gives the same answer every time. An optional AI layer adds two features on top: asking search questions in plain English, and rating how well a candidate matches the job. With no API keys configured, the AI features are hidden and everything else works normally.
 
@@ -60,15 +60,15 @@ python -m venv .venv
 
 ## System architecture
 
-The core modules (`stages`, `pipeline`, `store`, `search`) are plain Python with no FastAPI imports and no knowledge of the AI layer. Routes are a thin layer that validates input and calls them. The AI layer is one more set of modules that calls into the core: a translated query runs through the same parser as a typed one, and a rating is written through the same append-only path as every other event.
+The core modules (`stages`, `pipeline`, `store`, `search`) are plain Python with no FastAPI imports and no knowledge of the AI layer. Routes are a thin layer that validates input and calls them. The AI layer is one more set of modules that calls into the core: a translated question becomes the same filters the recruiter could have chosen by hand, and a rating is written through the same append-only path as every other event.
 
 ```mermaid
 flowchart TB
-    browser["Browser (HTML / CSS / vanilla JS)<br/>search box · pipeline board · candidate panel · job portal"]
+    browser["Browser (HTML / CSS / vanilla JS)<br/>name search + filters · pipeline board · candidate panel · job portal"]
     routes["Routes: app/main.py + schemas.py<br/>Pydantic validation · one error shape · 400 / 404 / 409"]
     pipeline["pipeline.py + stages.py<br/>stage rules · add / advance / reject · record a rating"]
-    search["search/<br/>lexer → parser → query tree<br/>filter + rank · fuzzy names · explained errors"]
-    ai["ai/ (optional)<br/>assist.py: English → query<br/>rating.py: resume → rating"]
+    search["search/<br/>filters → query tree<br/>match + rank · fuzzy names · explained empty results"]
+    ai["ai/ (optional)<br/>assist.py: English → filters<br/>rating.py: resume → rating"]
     store["store.py: SQLite<br/>events table: INSERT only, hash-chained<br/>jobs table"]
     resumes["resumes/<br/>PDF → text + page images, filed by hash"]
     models["DeepSeek · Jev"]
@@ -102,8 +102,8 @@ The FastAPI server also serves the frontend from `static/`.
 | GET | `/api/jobs` | Jobs and their requirements |
 | GET | `/api/jobs/{id}` | One job, looked up by ID in any case |
 | POST | `/api/jobs` | Add a job. Jobs can't be edited afterwards |
-| GET | `/api/search?q=…` | Ranked results, or an explained error. Never uses AI |
-| POST | `/api/assist` | Search that also accepts a plain-English question: path taken, interpreted query, description, results |
+| GET | `/api/search?name=…&stages=…&exclude=…&min_days=…&max_days=…&reached=…&reached_when=…&reached_date=…&not_reached=…&job=…&advanced=…` | Ranked results with a plain-English description of the filters, or an explanation of why nobody matched. Never uses AI |
+| POST | `/api/assist` | Search box text on Enter, with the filters already applied: path taken, the filters to show, description, results |
 | GET | `/api/ai/status` | Which AI features are available (both keys configured?) |
 | GET | `/api/audit/verify` | Checks the history hash chain is intact |
 | POST | `/api/demo/seed` | Loads 14 demo candidates with backdated history and made-up resumes (empty pipeline only) |
@@ -111,12 +111,12 @@ The FastAPI server also serves the frontend from `static/`.
 There are deliberately **no** endpoints to edit or delete history. Errors share one shape so the frontend can display them directly:
 
 ```json
-{ "error": "invalid_query",
-  "message": "'stge' isn't a field. Did you mean 'stage'?",
-  "position": 0 }
+{ "error": "invalid_filter",
+  "message": "You chose Hired as the current stage but also excluded it, so nobody can match.",
+  "position": null }
 ```
 
-Status codes: `400` bad query or input · `404` unknown candidate or job · `409` a move the rules do not allow (for example "Already hired; final outcomes can't be changed." or "Priya Sharma is no longer in Screening; refresh and try again."), a duplicate application, or a duplicate job ID.
+Status codes: `400` bad filters or input · `404` unknown candidate or job · `409` a move the rules do not allow (for example "Already hired; final outcomes can't be changed." or "Priya Sharma is no longer in Screening; refresh and try again."), a duplicate application, or a duplicate job ID.
 
 ## Core components
 
@@ -138,29 +138,33 @@ Status codes: `400` bad query or input · `404` unknown candidate or job · `409
 
 ### Search: `search/`
 
-Bare words search names with typo tolerance; other terms are filters. Terms combine with spaces (AND), `OR`, `-` or `NOT` (negation), and parentheses.
+The recruiter never types syntax. The search box is a typo-tolerant name search, and everything else is a filter chosen from the **Filters** panel. All of them combine with AND.
 
-| Recruiter's question | Query |
+| Recruiter's question | How she asks it |
 | --- | --- |
-| Find Priya Sharma (typed "sharam") | `sharam` |
-| Who's in Interview right now? | `stage:interview` |
-| Stuck in Screening for more than a week | `stage:screening for:>7d` |
-| Moved to Interview since Monday | `reached:interview>=monday` |
-| Reached Offer but didn't get hired | `reached:offer -stage:hired` |
-| Everyone except rejected candidates | `-stage:rejected` |
-| Applicants for one job | `job:JOB-001` |
-| Combined example | `(stage:interview OR stage:offer) priya` |
+| Find Priya Sharma (typed "sharam") | Search box: `sharam` |
+| Who's in Interview right now? | Current stage: Interview |
+| Stuck in Screening for more than a week | Current stage: Screening · Time in current stage: More than a week |
+| Moved to Interview since Monday | Reached stage: Interview · When: Since Monday |
+| Reached Screening before Monday / on one day | Reached stage: Screening · When: Before Monday / On Yesterday |
+| Never made it to Interview | Never reached: Interview |
+| Reached Offer but didn't get hired | Reached stage: Offer · Exclude stage: Hired |
+| Everyone except rejected candidates | Exclude stage: Rejected |
+| Applicants for one job | Job: JOB-001 |
+| Combined example | Search box: `priya` · Current stage: Interview and Offer |
 
-Fields: `stage:` (current stage; an unambiguous prefix such as `stage:int` is accepted), `for:` (time in current stage, with `>`, `>=`, `<`, `<=`), `reached:` (entered a stage, optionally compared with a date), `job:` (job applied for), `name:` (a name that looks like a keyword). Quoted phrases search each word as a name. Dates can be `today`, `yesterday`, a weekday (the most recent one, counting today), `DD-MM-YYYY` or `DD/MM/YYYY` (or `YYYY-MM-DD`), or how long ago (`3d`). Durations use `h`, `d` or `w`. "Monday" and "today" are resolved in IST.
+Filters: current stage (any of several), excluded stages, time in current stage (more than / less than N days), stage reached (optionally since, before or on today, yesterday, a weekday, a date, or N days ago), a stage never reached, and job. Above the results, a line always says exactly what was searched, in plain English. "Monday" and "today" are resolved in the recruiter's time zone, IST by default.
 
-- **Fuzzy matching:** optimal string alignment distance, which counts swapped adjacent letters as one typo, so "sharam" is one step from "sharma". Words of up to 3 letters must match exactly, 4 to 7 letters allow one typo, 8 or more allow two. Exact and prefix matches score highest.
-- **Ranking:** name similarity first. For filter-only searches, the most relevant signal: the most recent move for a dated `reached:` filter, otherwise the longest time in the current stage.
-- **Explained errors:** unknown fields and stages with suggestions, bad dates or durations with the position marked, contradictions (two stages at once: "Did you mean … OR …?"), unbalanced parentheses and quotes, and for empty results, which part of the query ruled everyone out.
+- **`filters.py`** turns the filters into a query tree (`to_tree`) and back (`from_tree`, used for AI translations). `from_tree` puts every condition that fits a menu into the menus; anything left (OR across different filters, a second "reached", NOT on a job) goes into an `advanced` field, which runs like any other filter and shows as its own chip in plain English. So every valid query can be run and shown. It rejects filters that can't work together before searching: a stage that is both chosen and excluded, reached and never reached the same stage, a date without a stage, "on" with a moment instead of a day, "more than 7 days" and "less than 3 days" together.
+- **`parser.py`** is internal. It reads the query strings DeepSeek writes and the evals' expected answers; recruiters never see it.
+- **Fuzzy matching:** optimal string alignment distance, which counts swapped adjacent letters as one typo, so "sharam" is one step from "sharma". Words of up to 3 letters must match exactly, 4 to 7 letters allow one typo, 8 or more allow two. Exact and prefix matches score highest. Filler words around a name ("find", "show me") are ignored.
+- **Ranking:** name similarity first. For filter-only searches, the most relevant signal: the most recent move for a "since" filter, otherwise the longest time in the current stage.
+- **Explained empty results** (`evaluate.py` with `describe.py`), always in plain English: which filter nobody matches ("Nobody has applied for JOB-002."), or which one ruled out the rest ("Only 1 candidate is currently in Offer, and it's not someone who has been in their current stage for less than 1 day."). A question typed in the name box is pointed at the right filter ("The search box only looks for names. To see who is in Interview, open Filters and choose it under Current stage.").
 
 ### Frontend: `static/`
 
-- **`index.html`:** search box, **Apply Filters** panel (dropdowns for name, job, current stage, excluded stage, time in stage and stage reached, which write a query into the search box), the pipeline board (one column per stage), ranked search results, the add-candidate dialog, and a slide-in candidate panel with the rating card, the job's requirements beside the candidate's details, the history timeline, the resume viewer, and only the valid actions.
-- **`app.js`:** a small `api()` helper around `fetch` that turns error JSON into readable messages; renders the board, results and panel; debounced search as you type (never AI); `Enter` sends the text to `/api/assist`; polls the rating while it runs; re-fetches after every action.
+- **`index.html`:** name search box, a **Filters** button with a count of active filters, removable chips for each applied filter, the collapsible filters panel (current stage, excluded stage, time in stage, job, stage reached with since / before / on a day, never reached), a "Showing candidates who…" line above the results, the pipeline board (one column per stage), ranked search results, the add-candidate dialog, and a slide-in candidate panel with the rating card, the job's requirements beside the candidate's details, the history timeline, the resume viewer, and only the valid actions.
+- **`app.js`:** a small `api()` helper around `fetch` that turns error JSON into readable messages; renders the board, results and panel; debounced search as you type and on every filter change (never AI); `Enter` sends the text and current filters to `/api/assist`, and fills the filters panel with what comes back; polls the rating while it runs; re-fetches after every action.
 - **`jobs.html`:** the Job portal, a plain sheet of jobs with an empty row at the bottom for adding one.
 - **`styles.css`:** dark theme; board columns, cards, panel, rating card and sheet; works on smaller screens.
 
@@ -216,35 +220,34 @@ Rating a candidate needs something to rate against, so every application is link
 
 ## Feature 1: ask in plain English
 
-The recruiter can type a question like "who's been sitting in screening forever?" instead of `stage:screening for:>7d`. Typed queries and name searches still run instantly, as she types, with no AI.
+The recruiter can type a question like "who's been sitting in screening forever?" instead of choosing Current stage: Screening and More than a week. The answer comes back as those same filters, filled in so she can see and adjust them. Name searches still run instantly, as she types, with no AI.
 
 ```mermaid
 flowchart TD
-    A["Recruiter presses Enter"] --> P{"Query parser<br/>(deterministic core)"}
-    P -- "parses, and is not only plain words matching nobody" --> R["Run query<br/>instant, no AI"]
-    P -- "parse error, or plain words matching no name" --> J["Jev router: one call<br/>Choice + Noul"]
-    J -- "query typo" --> E["Show the parser's error"]
+    A["Recruiter presses Enter"] --> P{"Do the words match<br/>a candidate's name?"}
+    P -- "yes" --> R["Name search + her filters<br/>instant, no AI"]
+    P -- "no" --> J["Jev router: one call<br/>Choice + Noul"]
     J -- "candidate name" --> N["Show the name search"]
     J -- "off-topic, unclear, or on-topic below 0.5" --> T["Template message"]
     J -- "English question" --> D["DeepSeek translates<br/>English → query string"]
-    D --> V{"Parser validates<br/>1 retry with the error fed back"}
-    V -- "still invalid, or UNSUPPORTED" --> C["Couldn't interpret<br/>show the parser's message"]
-    V -- valid --> S["Describe the query in English<br/>(code, no AI)"]
+    D --> V{"Parser validates, then<br/>converted to portal filters<br/>(leftovers kept as an extra condition)<br/>1 retry with the problem fed back"}
+    V -- "still invalid, or UNSUPPORTED" --> C["I couldn't turn that into a search"]
+    V -- valid --> S["Describe the filters in English<br/>(code, no AI)"]
     S --> K["Jev check: Noul<br/>does it answer the question?"]
-    K -- "probability ≥ 0.7" --> I["Run + 'Interpreted as: …'"]
-    K -- "below 0.7" --> G["Show as a suggestion<br/>she runs it or edits it"]
+    K -- "probability ≥ 0.7" --> I["Fill in the filters, run,<br/>'Interpreted as: …'"]
+    K -- "below 0.7" --> G["Offer the filters<br/>she applies or adjusts them"]
 ```
 
-If Jev or DeepSeek fails or times out at any point, she gets exactly what the plain search would have given: the parser's error or the name search.
+If Jev or DeepSeek fails or times out at any point, she gets exactly what the plain search would have given: the name search with her filters, and its explanation.
 
 ### Step by step
 
-- **When AI runs.** Only when she presses Enter and either the parser rejects the input, or the input is two or more plain words (no fields) that match no candidate. Bare words are valid name searches, so "sharam" and "priya sharma" never reach the AI; "who got hired last week" does. A sentence containing "or", "and" or "not" still counts as plain words, even though the parser reads those as operators.
-- **Jev router.** One request asks two questions: a Choice (`query_typo`, `candidate_name`, `english_question`, `off_topic`, `unclear`) and a Noul (is this about candidates in a hiring pipeline?). The router takes the top answer; an on-topic probability below 0.5 overrides it to off-topic. DeepSeek is only called for English questions.
-- **DeepSeek translation.** A fixed prompt describes the query language with examples and today's date, at temperature 0. It must return only a query string, or `UNSUPPORTED` if the question can't be expressed.
-- **Validation.** Our parser checks the output. If invalid, DeepSeek gets one retry with the parser's error message; if it fails again, she is told it couldn't be interpreted, with the parser's explanation of her input.
-- **Describe, then check.** Our code turns the query back into English ("Candidates who have been in Screening for more than 7 days"), and a Jev Noul checks it against her question.
-- **Confidence decides the UI.** At or above 0.7, results show with "Interpreted as: …" and the query, which she can edit. Below, the query is offered as a suggestion she runs or edits.
+- **When AI runs.** Only when she presses Enter and the words in the search box match no candidate's name. "sharam" and "priya sharma" never reach the AI; "who got hired last week" does.
+- **Jev router.** One request asks two questions: a Choice (`candidate_name`, `english_question`, `off_topic`, `unclear`) and a Noul (is this about candidates in a hiring pipeline?). The router takes the top answer; an on-topic probability below 0.5 overrides it to off-topic. DeepSeek is only called for English questions.
+- **DeepSeek translation.** A fixed prompt describes the full query language with examples and today's date, at temperature 0. It must return only a query string, or `UNSUPPORTED` if the question isn't about finding candidates by name, stage, time in stage, when they reached a stage, or job.
+- **Validation.** Our parser checks the output and `filters.from_tree` converts it to portal filters, keeping anything no menu can hold as an extra condition. If the parser or the filters reject it, DeepSeek gets one retry with the problem; if it fails again, she is told it couldn't be turned into a search.
+- **Describe, then check.** Our code turns the filters that will actually run back into English ("Candidates who have been in Screening for more than 7 days"), and a Jev Noul checks it against her question.
+- **Confidence decides the UI.** At or above 0.7, the filters are filled in and run, with "Interpreted as: …" and a link to adjust them. Below, the filters are offered to apply or adjust first. Filters from the AI replace the ones she had applied.
 
 ## Feature 2: candidate match rating
 
@@ -310,9 +313,9 @@ Following TypeSafe's guidance, every Jev question, option list, rubric and thres
 
 | ID | Type | Question | How the answer is used |
 | --- | --- | --- | --- |
-| `input_kind` | Choice | What kind of input is the search text? Options: query with a typo, candidate name, question in English, off-topic, unclear | Top answer picks the path; no threshold |
+| `input_kind` | Choice | What kind of input is the search text? Options: candidate name, question in English, off-topic, unclear | Top answer picks the path; no threshold |
 | `on_topic` | Noul | Is the input an attempt to find or filter candidates in a hiring pipeline? | Below 0.5 → off-topic message |
-| `translation_ok` | Noul | Would the described search return the candidates the recruiter asked for? | At or above 0.7 → run; else suggest (to be tuned with evals) |
+| `translation_ok` | Noul | Would the described search return the candidates the recruiter asked for? | At or above 0.7 → apply the filters; else suggest them (to be tuned with evals) |
 | `skills_match` | Score | How well do the candidate's verified skills cover the job's required and nice-to-have skills? (5 levels) | Category score; confidence below 0.5 → needs review |
 | `experience_match` | Score | How does the candidate's relevant experience compare with the job's minimum? (5 levels) | Category score; confidence below 0.5 → needs review |
 | `role_relevance` | Score | How relevant are the candidate's past roles to this job? (5 levels) | Category score; confidence below 0.5 → needs review |
@@ -327,19 +330,19 @@ Following TypeSafe's guidance, every Jev question, option list, rubric and thres
 | Jev doesn't answer, or its reply is incomplete | "Rating failed: The scoring service did not answer." with the button to try again |
 | No expected CTC given | Budget fit shown as "Not rated"; the overall uses the other categories |
 | Jev unsure on a category | Score shown with a "needs review" flag |
-| Search AI times out or errors | The normal parser error or name search for her input; the page never blocks |
-| Low-confidence search translation | The query shown as a suggestion to run or edit |
-| Question the query language can't express | "I couldn't turn that into a search." |
+| Search AI times out or errors | The name search with her filters, and its explanation; the page never blocks |
+| Low-confidence search translation | The filters offered to apply or adjust first |
+| Question that isn't about candidates, or no valid query after the retry | "I couldn't turn that into a search. Try rephrasing it, or choose what you need under Filters." |
 
 ## Privacy
 
-- Plain-English search sends only her question text (and today's date, and the English description of the translated query), never candidate records.
+- Plain-English search sends only her question text (and today's date, and the English description of the translated filters), never candidate records.
 - Rating sends the resume text to DeepSeek for fact extraction; that text includes the candidate's personal details. Jev receives only the job requirements and verified, job-relevant facts, with no personal details.
 - Original resume files stay on the server and are never served.
 
 ## Evaluation
 
-- **Search eval** (`evals/search_eval.py`): 30 English questions with expected queries. A translation counts as correct when it finds the same candidates in the demo data as the expected query. Reports accuracy and how many were run automatically versus suggested.
+- **Search eval** (`evals/search_eval.py`): 30 English questions with expected queries. A translation counts as correct when the filters it produces find the same candidates in the demo data as the expected query. Reports accuracy and how many were run automatically versus suggested.
 - **Rating eval** (`evals/rating_eval.py`): the 14 made-up demo resumes with expected category scores, reported as agreement within ±1 point per category. The expected scores are a first draft to be reviewed by a person.
 - **Fairness check:** the same resume rated under a different name must get the same rating. Because Jev never sees the name, this should hold by design; the rating eval checks it against the live models.
 - **Consistency check:** rating the same resume twice should give the same result; checked by the rating eval.
@@ -360,10 +363,12 @@ Recruitly/
 │   ├── jobs.py            # Job type and the prefilled jobs
 │   ├── seed.py            # demo candidates and their made-up resumes
 │   ├── search/
-│   │   ├── lexer.py
-│   │   ├── parser.py
-│   │   ├── evaluate.py    # filtering + ranking + empty-result explanations
-│   │   └── fuzzy.py
+│   │   ├── filters.py     # portal filters ⇄ query tree; catches impossible combinations
+│   │   ├── evaluate.py    # matching + ranking + empty-result explanations
+│   │   ├── describe.py    # query tree → plain English (no AI)
+│   │   ├── fuzzy.py
+│   │   ├── lexer.py       # internal: reads DeepSeek's query strings
+│   │   └── parser.py
 │   ├── resumes/
 │   │   ├── storage.py     # store PDF by hash, outside the web folder
 │   │   ├── render.py      # extract text + render page images (pypdfium2)
@@ -375,8 +380,7 @@ Recruitly/
 │       ├── deepseek.py    # query translation + resume fact extraction
 │       ├── evidence.py    # checks each extracted quote exists in the resume
 │       ├── rating.py      # orchestrates the rating flow, computes the overall
-│       ├── describe.py    # parsed query → plain English (no AI)
-│       ├── assist.py      # orchestrates plain-English search
+│       ├── assist.py      # plain-English search → portal filters
 │       └── messages.py    # templates for off-topic / unclear / low confidence / rating status
 ├── static/
 │   ├── index.html
@@ -426,9 +430,10 @@ Both keys are needed for either AI feature. `RECRUITLY_DB` sets the database pat
 | --- | --- |
 | Ratings run automatically when a candidate is added | Ratings run when the recruiter clicks **Create candidate rating**, with a spinner until done. Requested so the recruiter decides when models are called |
 | Jobs are seeded only | A jobs table prefilled with JOB-001, plus a Job portal page for adding jobs (add only, no editing) |
-| The search language gains `rating:` and `job:` filters | Only `job:` was added, also as a Job dropdown in Apply Filters. There is no filtering on ratings |
-| The router's Choice runs only after the parser rejects input or words match no name | Same, plus sentences containing "or", "and" or "not" count as plain words, so they reach the AI instead of being read as operators |
-| DeepSeek returns only a query string | Same, plus it may return `UNSUPPORTED` when the query language can't express the question |
+| The search language gains `rating:` and `job:` filters | Only a Job filter was added. There is no filtering on ratings |
+| Recruiters type a query language (`stage:screening for:>7d`), with a filters panel that writes it | The query language is hidden. Recruiters use a name box and filters, including "never reached" and since / before / on a day. The syntax is only used internally for AI translations and evals. OR across different filters has no menu; it is reachable by asking in plain English and shows as its own chip |
+| The router's Choice runs only after the parser rejects input or words match no name | It runs when the typed words match no name. There is no "query typo" option any more, since nothing is typed in the syntax |
+| DeepSeek returns only a query string | Same, plus it may return `UNSUPPORTED` when the question isn't a candidate search |
 | Jev's key named `TYPESAFE_API_KEY` | `JEV_API_KEY` is accepted as well |
 | Years of experience come from DeepSeek | Also computed in code from the verified role dates, and both are shown |
 | Only successful ratings are saved | Failed attempts are recorded as well, so "Rating failed" survives a restart |

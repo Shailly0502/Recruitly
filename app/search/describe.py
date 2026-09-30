@@ -1,9 +1,9 @@
-"""Parsed query -> plain English. Deterministic, so Jev can check it."""
+"""Query tree -> plain English. Deterministic, so Jev can check it and empty results can be explained."""
 
 from datetime import datetime
 
 from .. import stages
-from ..search.parser import And, InStageFor, JobIs, Name, Node, Not, Or, Reached, StageIs
+from .parser import And, InStageFor, JobIs, Name, Node, Not, Or, Reached, StageIs
 
 _MORE_LESS = {">": "more than", ">=": "at least", "<": "less than", "<=": "at most"}
 _DAY = {">=": "on or after", ">": "after", "<": "before", "<=": "on or before", "=": "on"}
@@ -11,7 +11,23 @@ _DAY = {">=": "on or after", ">": "after", "<": "before", "<=": "on or before", 
 
 def describe(tree: Node, now: datetime) -> str:
     """`now` must match the time the query was parsed with."""
-    return "Candidates who " + _clause(tree, now, top=True)
+    return "Candidates who " + phrase(tree, now)
+
+
+def phrase(node: Node, now: datetime) -> str:
+    """One clause as a plural verb phrase: "are currently in Screening"."""
+    return _clause(node, now, top=True)
+
+
+def singular(text: str) -> str:
+    """ "are currently in Screening" -> "is currently in Screening", for "nobody ..." and "1 candidate ..." """
+    for plural, one in (("are ", "is "), ("have ", "has "), ("do not ", "does not ")):
+        if text.startswith(plural):
+            text = one + text[len(plural):]
+        # Every verb of "a or b" / "a and b", not just the first.
+        for joiner in (" or ", " and ", " or (", " and ("):
+            text = text.replace(joiner + plural, joiner + one)
+    return text
 
 
 def _clause(node: Node, now: datetime, top: bool = False) -> str:
@@ -19,6 +35,8 @@ def _clause(node: Node, now: datetime, top: bool = False) -> str:
         return f"have a name like '{node.term}'"
     if isinstance(node, StageIs):
         return f"are currently in {stages.LABELS[node.stage]}"
+    if isinstance(node, Or) and all(isinstance(child, StageIs) for child in node.children):
+        return "are currently in " + " or ".join(stages.LABELS[child.stage] for child in node.children)
     if isinstance(node, InStageFor):
         return f"have been in their current stage for {_MORE_LESS[node.op]} {_duration(node.seconds)}"
     if isinstance(node, Reached):
@@ -36,6 +54,17 @@ def _clause(node: Node, now: datetime, top: bool = False) -> str:
                 waited = children.pop(0)
                 parts.append(f"have been in {stages.LABELS[child.stage]} for "
                              f"{_MORE_LESS[waited.op]} {_duration(waited.seconds)}")
+            elif isinstance(child, Name):
+                # "priya sharma" reads as one name.
+                terms = [child.term]
+                while children and isinstance(children[0], Name):
+                    terms.append(children.pop(0).term)
+                parts.append(f"have a name like '{' '.join(terms)}'")
+            elif _excluded_stage(child):
+                excluded = [child.child.stage]
+                while children and _excluded_stage(children[0]):
+                    excluded.append(children.pop(0).child.stage)
+                parts.append("are not currently in " + " or ".join(stages.LABELS[stage] for stage in excluded))
             else:
                 parts.append(_clause(child, now))
         joined = " and ".join(parts)
@@ -44,9 +73,15 @@ def _clause(node: Node, now: datetime, top: bool = False) -> str:
     return joined if top else f"({joined})"
 
 
+def _excluded_stage(node: Node) -> bool:
+    return isinstance(node, Not) and isinstance(node.child, StageIs)
+
+
 def _negated(node: Node, now: datetime) -> str:
     if isinstance(node, StageIs):
         return f"are not currently in {stages.LABELS[node.stage]}"
+    if isinstance(node, Or) and all(isinstance(child, StageIs) for child in node.children):
+        return "are not currently in " + " or ".join(stages.LABELS[child.stage] for child in node.children)
     if isinstance(node, Reached) and node.op is None:
         return f"never reached {stages.LABELS[node.stage]}"
     if isinstance(node, Name):

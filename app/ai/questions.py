@@ -6,7 +6,7 @@ run lowest to highest; Jev returns a position from 0. Question IDs aren't sent.
 
 # ---- thresholds -------------------------------------------------------------
 
-# At or above: run the translated query. Below: suggest it. Tune with the evals.
+# At or above: apply the translated filters. Below: suggest them. Tune with the evals.
 TRANSLATION_OK_THRESHOLD = 0.7
 
 # Below this, the input is treated as off-topic.
@@ -20,8 +20,8 @@ NEEDS_REVIEW_CONFIDENCE = 0.5
 
 ROUTER_CONTEXT = (
     "A recruiter typed `search_input` into the search box of a hiring pipeline portal. "
-    "The box accepts candidate names, and a filter syntax with the fields stage:, for:, "
-    "reached:, job: and name:, combined with OR, a leading minus for NOT, and parentheses. "
+    "The box searches candidate names, and also accepts questions in plain English about "
+    "candidates. Stages, time in stage, dates and jobs are otherwise chosen from filter menus. "
     "The stages are applied, screening, interview, offer, hired and rejected."
 )
 
@@ -29,11 +29,6 @@ INPUT_KIND = {
     "type": "choice",
     "instructions": "What kind of input is `search_input`?",
     "criteria": {
-        "query_typo": (
-            "An attempt at the filter syntax that contains a mistake: a misspelled field or "
-            "stage such as stge:interview or stage:intervew, a malformed comparison, or "
-            "unbalanced parentheses. It is built from colons and symbols, not sentences."
-        ),
         "candidate_name": (
             "A person's name or part of one, possibly misspelled, with no question or "
             "instruction around it."
@@ -56,7 +51,7 @@ ON_TOPIC = {
     "type": "noul",
     "instructions": "Is `search_input` an attempt to find or filter candidates in a hiring pipeline?",
     "criteria": {
-        "true": "It names a candidate, uses the filter syntax, or asks about candidates, stages or hiring outcomes.",
+        "true": "It names a candidate, or asks about candidates, stages or hiring outcomes.",
         "false": "It is about something else, or asks the portal to do something other than search.",
     },
 }

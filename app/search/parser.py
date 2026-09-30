@@ -1,5 +1,9 @@
 """Tokens -> query tree, or a QueryError explaining what's wrong.
 
+Internal: recruiters never see this syntax. It is what DeepSeek writes when it
+translates a question (then converted to portal filters by filters.py), and
+what the evals' expected answers are written in.
+
 Grammar (a space between terms means AND):
 
     query  := and ( OR and )*
@@ -271,43 +275,44 @@ class _Parser:
         when_position = position + len(value) - len(when_text)
         if not when_text:
             raise QueryError(f"'{op}' needs a date after it. {DATE_HELP}", when_position)
-        start, end = self._when(when_text.lower(), when_position)
+        start, end = when(when_text.lower(), self.now, when_position)
         if op == "=" and start == end:
             raise QueryError(f"'{when_text}' is a moment, not a day. Use >= or <, like reached:{stage}>={when_text}.",
                              when_position)
         return Reached(src, pos, stage, op, start, end)
 
-    def _when(self, text: str, position: int) -> tuple[datetime, datetime]:
-        """Time span for `text`: a whole day, or a single moment for "3d"."""
-        today = self.now.replace(hour=0, minute=0, second=0, microsecond=0)
-        day = None
-        if text == "today":
-            day = today
-        elif text == "yesterday":
-            day = today - timedelta(days=1)
-        else:
-            weekdays = [name for name in WEEKDAYS if name == text or (len(text) >= 3 and name.startswith(text))]
-            if len(weekdays) == 1:
-                # The most recent one, counting today.
-                day = today - timedelta(days=(today.weekday() - WEEKDAYS.index(weekdays[0])) % 7)
-            elif re.fullmatch(r"\d{4}-\d{2}-\d{2}|\d{2}[-/]\d{2}[-/]\d{4}", text):
-                # 2026-09-28, or day first: 28-09-2026 / 28/09/2026.
-                layout = "%Y-%m-%d" if text[4] == "-" else "%d-%m-%Y"
-                try:
-                    day = datetime.strptime(text.replace("/", "-"), layout).replace(tzinfo=self.now.tzinfo)
-                except ValueError:
-                    raise QueryError(f"'{text}' isn't a real date.", position) from None
-        if day is not None:
-            return day, day + timedelta(days=1)
 
-        seconds = _duration(text)
-        if seconds is not None:
-            moment = self.now - timedelta(seconds=seconds)
-            return moment, moment
-        hint = suggest(text, WEEKDAYS + ["today", "yesterday"])
-        if hint:
-            raise QueryError(f"'{text}' isn't a date. Did you mean '{hint}'?", position)
-        raise QueryError(f"'{text}' isn't a date. {DATE_HELP}", position)
+def when(text: str, now: datetime, position: int = 0) -> tuple[datetime, datetime]:
+    """Time span for `text`: a whole day, or a single moment for "3d"."""
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    day = None
+    if text == "today":
+        day = today
+    elif text == "yesterday":
+        day = today - timedelta(days=1)
+    else:
+        weekdays = [name for name in WEEKDAYS if name == text or (len(text) >= 3 and name.startswith(text))]
+        if len(weekdays) == 1:
+            # The most recent one, counting today.
+            day = today - timedelta(days=(today.weekday() - WEEKDAYS.index(weekdays[0])) % 7)
+        elif re.fullmatch(r"\d{4}-\d{2}-\d{2}|\d{2}[-/]\d{2}[-/]\d{4}", text):
+            # 2026-09-28, or day first: 28-09-2026 / 28/09/2026.
+            layout = "%Y-%m-%d" if text[4] == "-" else "%d-%m-%Y"
+            try:
+                day = datetime.strptime(text.replace("/", "-"), layout).replace(tzinfo=now.tzinfo)
+            except ValueError:
+                raise QueryError(f"'{text}' isn't a real date.", position) from None
+    if day is not None:
+        return day, day + timedelta(days=1)
+
+    seconds = _duration(text)
+    if seconds is not None:
+        moment = now - timedelta(seconds=seconds)
+        return moment, moment
+    hint = suggest(text, WEEKDAYS + ["today", "yesterday"])
+    if hint:
+        raise QueryError(f"'{text}' isn't a date. Did you mean '{hint}'?", position)
+    raise QueryError(f"'{text}' isn't a date. {DATE_HELP}", position)
 
 
 def _split_operator(text: str) -> tuple[str | None, str]:

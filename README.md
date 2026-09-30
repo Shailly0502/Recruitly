@@ -2,6 +2,8 @@
 
 A lightweight applicant tracking system for running a hiring pipeline.
 
+**Repository:** https://github.com/Shailly0502/Recruitly · **Summary (PDF):** [docs/Recruitly-summary.pdf](docs/Recruitly-summary.pdf) · **Full design:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
 Candidates move through **Applied → Screening → Interview → Offer → Hired** and can be rejected at any point before they're hired. Recruitly keeps a tamper-evident history of every move, and has a typo-tolerant name search with ordinary filters for stage, time in stage, date reached and job.
 
 ## Features
@@ -110,7 +112,7 @@ app/
   ai/              plain-English search and candidate rating
 static/            frontend (index.html, jobs.html, app.js, styles.css)
 evals/             accuracy checks against the live APIs
-docs/              architecture notes
+docs/              architecture notes, summary PDF
 ```
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design: diagrams, API reference, rubrics and failure handling.
@@ -166,11 +168,49 @@ Errors always come back as `{error, message, position}` with a 400, 404 or 409. 
 - A resume can't be replaced after a candidate is created.
 - The rating thresholds are starting values and haven't been tuned against the evals yet.
 
-## Roadmap
+## Where I disagreed with the AI
 
-- Run the evals and tune thresholds and rubric wording
-- User accounts and per-user audit entries
-- Editing jobs, with changes recorded
-- OCR for scanned resumes
-- Notes on candidates
-- Move filtering into SQL once the candidate count gets large
+**How it evaluates a candidate.**
+
+The AI's plan for rating candidates was to pull skills, roles and years of experience out of the resume, score them against the job description with a rubric, and turn that into a score out of 10. It also ran that rating automatically for every candidate as soon as they were added.
+
+I don't think that's a sound basis for recognising a good candidate. Matching skills and counting years is a proxy for quality, not a measure of it. A strong candidate often shows up in things a rubric can't see from a job description: how fast they've grown, the impact and difficulty of their work, skills that transfer from a different stack, and whether they'd do well in this particular team. A score built only on overlap with the job description can rank a keyword-heavy resume above a better person. Then a recruiter has to double-check every number, which adds manual work instead of removing it. Learning what a good candidate looks like takes time and training on real outcomes: who was hired, who did well, and what recruiters corrected.
+
+What I changed because of it:
+
+- **Ratings run only when the recruiter asks.** They no longer start automatically when a candidate is added. There's a **Create candidate rating** button, so the recruiter decides when a model is involved.
+- **The rating is advice, not a decision.** It never moves, rejects or hires anyone. Every fact comes with a quote from the resume, and scores the model isn't confident about are flagged "needs review".
+- **A proper scoring model is first on the list below**, trained on real hiring outcomes instead of a hand-written rubric.
+
+## What I'd do with more time
+
+**A proper ATS scoring model**
+- Train and calibrate scoring on real outcomes (who was shortlisted, hired and did well), instead of hand-set rubric weights.
+- Learn from recruiters: a thumbs up or down on each rating, and corrections to extracted facts, fed back into the model.
+- Look at trajectory, impact and transferable skills, not just keyword and years overlap.
+- Run regular bias audits: the same resume under different names, genders and colleges must score the same, which the fairness eval already starts to check.
+- Tune the thresholds and rubric wording against the evals.
+
+**A better database**
+- A normalised schema with proper foreign keys: `candidates`, `jobs`, `applications` (one candidate, many jobs), `stages` and `events`, each referencing the others.
+- PostgreSQL with migrations and indexes, with filtering done in SQL instead of in memory.
+- User accounts and roles, with every event recording who made the change.
+- Editing jobs, with each change recorded in history.
+
+**UI and UX for more features**
+- Drag-and-drop between board columns, bulk actions (move or reject several candidates), and keyboard shortcuts.
+- Saved searches ("stuck in Screening over a week" as a one-click view), notes and tags on candidates.
+- Interview scheduling with calendar invites, and email templates for each stage.
+- Replacing a resume, OCR for scanned resumes, and a mobile layout.
+
+**A recruiter playground**
+- A sandbox with synthetic candidates where a recruiter can try filters and plain-English questions, rate candidates, adjust the rubric and weights, and see how rankings change, all without touching real data.
+- A guided tour for new recruiters built on the same sandbox.
+
+**Other ideas**
+- A pipeline analytics dashboard: time to hire, conversion at each stage, and the stages where candidates get stuck.
+- Alerts, such as "5 candidates have been in Screening for over a week" or an offer that's about to expire.
+- Semantic search over resumes ("has worked on payments at scale"), with the evidence highlighted.
+- AI-drafted interview questions aimed at gaps in a candidate's evidence.
+- Duplicate candidate detection across jobs.
+- A candidate-facing status page, and integrations with job boards, email and calendars.

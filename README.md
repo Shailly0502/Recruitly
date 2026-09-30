@@ -1,138 +1,184 @@
 # Recruitly
 
-A small applicant-tracking app for running one hiring pipeline: a stage board, a tamper-proof history for every candidate, and a single search box that understands questions like *"stuck in screening for more than a week"*.
+A lightweight applicant tracking system for running a hiring pipeline.
 
-> **Status: in development.** This README describes the target design. The [roadmap](#roadmap) shows what is built so far.
+Candidates move through **Applied → Screening → Interview → Offer → Hired** and can be rejected at any point before they're hired. Recruitly keeps a tamper-evident history of every move, and has a single search box that handles typos, time-based filters and combined queries.
 
-## What it does
+## Features
 
-**Pipeline**
-
-- Add candidates and see everyone grouped by current stage.
-- Move a candidate forward one stage at a time: Applied → Screening → Interview → Offer → Hired.
-- Reject a candidate from any stage before Hired.
-- Hired and Rejected are final. Skipping a stage or undoing a final outcome is refused by the server, not just hidden in the UI.
-- Open a candidate to see their full history and how long they have been in their current stage.
-
-**Audit trail**
-
-Every change is recorded as an event that can never be edited or deleted. A candidate's current stage is not stored separately; it is derived from their events, so the history and the board cannot disagree.
-
-**Search**
-
-One search box answers questions about names, current stage, time in stage, past movement, and exclusions:
-
-| The recruiter types | What it means |
-| --- | --- |
-| `sharam` | Name close to "sharam", so Priya **Sharma** is found despite the typo |
-| `in interview` | Current stage is Interview |
-| `stuck in screening for more than a week` | Current stage is Screening, entered more than 7 days ago |
-| `moved to interview since monday` | Entered Interview on or after the most recent Monday |
-| `reached offer but not hired` | Was in Offer at some point, and is not Hired now |
-| `everyone except rejected` | Anyone whose current state is not Rejected |
-
-Conditions can be combined (`priya in interview since monday`). Results are ranked, with the closest matches first.
-
-When a query cannot be understood, the app says why instead of showing an empty list:
-
-```
-> in interveiw
-Unknown stage "interveiw". Did you mean "interview"?
-
-> stuck in screening for more than banana
-Expected a duration after "more than", such as "3 days" or "a week".
-
-> hired and rejected
-No candidate can be both Hired and Rejected. These are final, separate outcomes.
-```
-
-## Architecture
-
-```
-  Browser (React)
-     │  JSON over HTTP
-     ▼
-  API (Express)
-     │
-     ├── Pipeline rules     which moves are allowed from which stage
-     ├── Search             text → parsed query → filter → rank
-     │
-     ▼
-  SQLite
-     ├── candidates         identity only (name, email, created)
-     └── events             append-only; one row per stage change
-```
-
-- **Pipeline rules** are one pure module: given a current stage and a requested move, it returns the new stage or a reason for refusing. The API calls it on every write, and it has no database or HTTP dependencies, so it is tested directly.
-- **Search** runs in three steps. A parser turns the text into a structured query or an error with a message. A filter selects candidates that satisfy it. A ranker orders them. Each step is tested on its own.
-- **Events** are the source of truth. Questions about the past ("reached Offer", "moved since Monday") are answered from the same rows that make up the audit trail.
+- **Pipeline board**: everyone grouped by current stage, with how long they've been there
+- **Strict stage rules**: one step forward at a time, and Hired/Rejected are final, enforced by the server
+- **Audit trail**: every action is an append-only event, hash-chained so edits to the database file are detected
+- **Search**: fuzzy name matching, filters by stage, time in stage, date reached, job, and negation
+- **Helpful errors**: a bad query tells you what's wrong and points at it, instead of returning nothing
+- **Jobs and resumes**: applications are tied to a job, and resumes are shown as page images only
+- **Plain-English search** (optional): type a question like "who's been stuck in screening for a week?"
+- **Candidate rating** (optional): scores a candidate against the job's requirements, with the evidence shown
 
 ## Tech stack
 
-| Layer | Choice |
-| --- | --- |
-| Frontend | React, TypeScript, Vite |
-| Backend | Node.js, Express, TypeScript |
-| Storage | SQLite |
-| Tests | Vitest |
+- Python 3.11+, FastAPI, Pydantic, Uvicorn
+- SQLite (standard library `sqlite3`)
+- Vanilla HTML, CSS and JavaScript, with no build step
+- pypdfium2 and Pillow for reading resumes
+- Optional: DeepSeek and TypeSafe (Jev) APIs for plain-English search and rating
 
-## Running it
-
-Requires Node.js 20 or newer.
+## Getting started
 
 ```bash
 git clone https://github.com/Shailly0502/Recruitly.git
 cd Recruitly
-npm install
-npm run dev      # API and web app, with sample candidates loaded
-npm test         # pipeline rules and search tests
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m uvicorn app.main:app --reload
 ```
 
-The terminal prints the local URL to open.
+On macOS/Linux use `.venv/bin/python` instead of `.venv\Scripts\python`.
 
-## Decisions and why
+Then open http://localhost:8000. The pipeline starts empty, so click **Load demo candidates** to get 14 sample candidates with history and resumes. Interactive API docs are at http://localhost:8000/docs.
 
-**Events are the source of truth, and the database enforces that they are append-only.**
-The requirement is that history can never be altered. Storing a `current_stage` column alongside a history table allows the two to drift apart. Instead, the stage is derived from events, and SQLite triggers reject any `UPDATE` or `DELETE` on the events table. The guarantee holds even for code that bypasses the API.
+Data lives in `data/` (a SQLite file plus the uploaded resumes). Delete that folder to start fresh, or point `RECRUITLY_DB` somewhere else.
 
-**Rejected is an outcome, not a stage.**
-A rejected candidate keeps the stage they were rejected from. This is what makes "reached Offer but didn't get hired" answerable, and it lets the board show where people dropped out.
+### Optional: plain-English search and rating
 
-**The search parser is rule-based, not an LLM.**
-The set of questions is small and well defined. A hand-written parser gives the same answer every time, runs instantly with no API key, can be tested exhaustively, and can explain exactly which word it did not understand. An LLM would handle looser phrasing, at the cost of all four.
+These two features call external APIs. To turn them on, create a `.env` file in the project root:
 
-**Typo tolerance uses Damerau–Levenshtein distance.**
-"sharam" for "sharma" is two letters swapped. Plain Levenshtein counts that as two edits; Damerau–Levenshtein counts it as one, which matches how people actually mistype names.
+```
+DEEPSEEK_API_KEY=your-key
+TYPESAFE_API_KEY=your-key
+```
 
-**Ranking is explicit.**
-Exact name matches come first, then prefix matches, then fuzzy matches by distance. For queries with no name, candidates who have waited longest in their current stage come first, since they are the ones most likely to need attention.
+You need both keys. Without them the features are simply hidden. Set `RECRUITLY_AI=off` to disable them while keeping the keys. The APIs are only called when you press Enter on a search the parser can't read, or click **Create candidate rating** on a profile.
 
-**"Since Monday" means the most recent Monday at 00:00 in the recruiter's time zone.**
-If today is Monday, it means today. Relative dates are resolved on the server using a time zone sent by the browser, so results do not shift at UTC midnight.
+## Usage
 
-**SQLite, with search done in application code.**
-One job's worth of candidates fits in memory. This keeps setup to `npm install` and keeps the search logic in one testable place. It is the first thing to change at larger scale (see below).
+### Search syntax
 
-## With more time
+Plain words search names, and typos are fine. Everything else is a filter.
 
-- Multiple jobs, and multiple recruiters with sign-in; record who made each change.
-- Notes and attachments on candidates, recorded as events.
-- Move filtering into SQL and add a trigram index for fuzzy names once candidates number in the tens of thousands.
-- Saved searches, and autocomplete in the search box that shows how the query is being interpreted as it is typed.
-- Drag and drop on the board.
-- End-to-end browser tests.
+| What you want | Query |
+| --- | --- |
+| Find Priya Sharma (misspelled) | `sharam` |
+| Who's in Interview right now | `stage:interview` |
+| Stuck in Screening for over a week | `stage:screening for:>7d` |
+| Moved to Interview since Monday | `reached:interview>=monday` |
+| Reached Offer but not hired | `reached:offer -stage:hired` |
+| Everyone except rejected | `-stage:rejected` |
+| Applicants for a job | `job:JOB-001` |
+| Combined | `(stage:interview OR stage:offer) priya` |
 
-## Built with AI assistance
+- Terms are combined with a space (AND), `OR`, `-` or `NOT`, and parentheses.
+- Dates: `today`, `yesterday`, a weekday, `2026-09-28`, or a relative time like `3d`.
+- Durations: `12h`, `7d`, `2w`.
 
-This project was built with Claude Code. The full chat logs are in [`ai-logs/`](ai-logs/).
+If you'd rather not type filters, **Apply Filters** has dropdowns that build the query for you.
 
-**A place I disagreed with the AI:** _to be written once the build is done._
+When something doesn't parse, you get a pointer to the problem:
+
+```
+stage:screening for:>banana
+                     ^
+'banana' isn't a duration. Use a number and a unit, like 12h, 7d or 2w.
+```
+
+If a valid query matches nobody, it tells you which part ruled everyone out.
+
+### Jobs
+
+The **Job portal** page lists every job as a plain table. Fill in the empty bottom row to add one. When adding a candidate you type the job ID, and the form shows that job's requirements.
+
+### Plain-English search
+
+Typing a question and pressing Enter sends it through a small pipeline. Jev decides whether it's a question at all. DeepSeek turns it into a query. The parser validates it, the app describes it back in plain English, and Jev checks that the description matches the question. Confident translations run and show "Interpreted as: ...". Less confident ones are offered as a suggestion you can run or edit.
+
+Normal queries and name searches never go through this and run as you type.
+
+### Candidate rating
+
+Click **Create candidate rating** on a candidate's profile. A spinner shows while it runs, then you get:
+
+- **Skills, Experience and Role relevance**, each out of 5, scored by Jev from facts DeepSeek extracted from the resume
+- **Budget fit** out of 5, from the expected salary against the job's budget
+- **An overall score** out of 10: `2 × (0.35·skills + 0.30·experience + 0.20·relevance + 0.15·budget)`
+
+Every extracted fact has to come with a quote that actually appears in the resume, otherwise it's thrown out. Jev only ever sees the job requirements and those verified facts, never the candidate's name or contact details. A rating never moves a candidate. It's saved to the history like any other event, and scores Jev was unsure about are flagged "needs review".
+
+The questions, rubrics and thresholds live in `app/ai/questions.py`, and the weights in `app/ai/weights.py`.
+
+## Project structure
+
+```
+app/
+  main.py          routes
+  stages.py        stage rules
+  pipeline.py      add / advance / reject / record rating
+  store.py         SQLite event store and jobs table
+  search/          lexer, parser, evaluation, fuzzy matching
+  resumes/         PDF storage, text extraction, page rendering
+  ai/              plain-English search and candidate rating
+static/            frontend (index.html, jobs.html, app.js, styles.css)
+evals/             accuracy checks against the live APIs
+docs/              architecture notes
+```
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design: diagrams, API reference, rubrics and failure handling.
+
+## API
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/api/candidates` | All candidates with current stage |
+| POST | `/api/candidates` | Add a candidate (multipart, with resume PDF) |
+| GET | `/api/candidates/{id}` | Candidate details and history |
+| POST | `/api/candidates/{id}/advance` | Move to the next stage |
+| POST | `/api/candidates/{id}/reject` | Reject |
+| GET | `/api/candidates/{id}/resume/pages/{n}` | A resume page as an image |
+| GET / POST | `/api/candidates/{id}/rating` | Get or create a rating |
+| GET / POST | `/api/jobs` | List or add jobs |
+| GET | `/api/search?q=...` | Search |
+| POST | `/api/assist` | Search that also accepts a plain-English question |
+| GET | `/api/audit/verify` | Check the history hasn't been tampered with |
+| POST | `/api/demo/seed` | Load demo data |
+
+Errors always come back as `{error, message, position}` with a 400, 404 or 409. There are no endpoints for editing or deleting history.
+
+## Design decisions
+
+**History is the source of truth.** There's no `current_stage` column that could drift out of sync. A candidate's stage, time in stage and latest rating are all computed from their events.
+
+**Append-only is enforced by the database.** SQLite triggers block `UPDATE` and `DELETE` on the events table, so even code that bypasses the API can't rewrite history. Each event also stores a hash of the previous one, so hand-editing the database file shows up in `/api/audit/verify`.
+
+**Moves carry the stage you saw.** Every advance or reject sends the stage the screen was showing. If the candidate has already moved (say, from a double click), the request is refused rather than skipping a stage.
+
+**A query language instead of free text.** A small grammar is predictable, fast and can explain its own errors. Plain-English search is layered on top and always shows you the query it ran.
+
+**Separate models for writing and judging.** DeepSeek writes queries and extracts facts. Jev checks translations and scores categories. Neither one's output reaches the screen without being checked by something else.
+
+**The overall score is a formula.** Jev scores narrow categories and the code combines them with visible weights, so it's always clear how the number was made.
+
+**Swapped letters count as one typo.** "sharam" vs "sharma" is one transposition. Plain Levenshtein counts that as two edits, while optimal string alignment counts it as one. Words of three letters or fewer have to match exactly.
+
+**"Monday" means your Monday.** The browser sends its timezone offset, so date filters don't shift at UTC midnight.
+
+**Keep it simple.** Search runs in memory, which is plenty for one company's candidates, and the frontend is plain static files.
+
+## Known limitations
+
+- Automated candidate scoring is regulated in some places (for example NYC's bias-audit rules and the EU AI Act). A production deployment would need a bias audit.
+- A rating sends the full resume text to DeepSeek.
+- Scanned resumes can be viewed but not rated, since there's no OCR.
+- Resumes are shown as images to discourage downloading, but a screenshot is always possible.
+- The hash chain can't detect the newest events being deleted from the end.
+- No user accounts, so events don't record who made a change.
+- Jobs can be added but not edited.
+- A resume can't be replaced after a candidate is created.
+- The rating thresholds are starting values and haven't been tuned against the evals yet.
 
 ## Roadmap
 
-- [ ] Pipeline rules and event store
-- [ ] API: add, advance, reject, fetch history
-- [ ] Board and candidate detail page
-- [ ] Search parser with error messages
-- [ ] Fuzzy name matching and ranking
-- [ ] Sample data and tests
+- Run the evals and tune thresholds and rubric wording
+- User accounts and per-user audit entries
+- Editing jobs, with changes recorded
+- OCR for scanned resumes
+- Notes on candidates
+- Move filtering into SQL once the candidate count gets large

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Recruitly Portal</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Recruitly <span>Portal</span></h1>
+    <nav class="topbar-actions">
+      <a class="button" href="/jobs">Job portal</a>
+      <button id="add-button" class="button primary" type="button">Add candidate</button>
+    </nav>
+  </header>
+
+  <main>
+    <section class="search" aria-label="Search candidates">
+      <div class="search-row">
+        <input id="search" type="search" autocomplete="off" spellcheck="false"
+               placeholder="Search a name, or filter: stage:screening for:>7d"
+               aria-label="Search candidates" aria-describedby="search-error">
+        <button id="filter-toggle" class="button" type="button" aria-expanded="false" aria-controls="filters">
+          Apply Filters
+        </button>
+      </div>
+      <div id="search-error" class="query-error" role="alert" hidden></div>
+      <div id="assist" class="assist" aria-live="polite" hidden></div>
+      <form id="filters" class="filters" hidden>
+        <div class="filter-grid">
+          <label class="field">Name
+            <input id="f-name" autocomplete="off" spellcheck="false" placeholder="Typos are fine">
+          </label>
+          <div class="field">Current stage
+            <details id="f-stage" class="multi"><summary>Any stage</summary><div class="options"></div></details>
+          </div>
+          <div class="field">Exclude stage
+            <details id="f-exclude" class="multi"><summary>None</summary><div class="options"></div></details>
+          </div>
+          <label class="field">Time in current stage
+            <select id="f-for">
+              <option value="">Any</option>
+              <option value="<1d">Less than a day</option>
+              <option value="<7d">Less than a week</option>
+              <option value=">3d">More than 3 days</option>
+              <option value=">7d">More than a week</option>
+              <option value=">14d">More than 2 weeks</option>
+              <option value=">30d">More than 30 days</option>
+            </select>
+          </label>
+          <label class="field">Job
+            <select id="f-job"><option value="">Any job</option></select>
+          </label>
+          <label class="field">Reached stage
+            <select id="f-reached"><option value="">Any</option></select>
+          </label>
+          <label class="field">Reached it since
+            <select id="f-since" disabled>
+              <option value="">Any time</option>
+              <option value="today">Today</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="monday">Monday</option>
+              <option value="7d">The last 7 days</option>
+              <option value="30d">The last 30 days</option>
+            </select>
+          </label>
+        </div>
+        <div class="filter-actions">
+          <button class="button primary" type="submit">Apply</button>
+          <button id="f-clear" class="button" type="button">Clear all</button>
+        </div>
+        <details class="syntax">
+          <summary>Or type a query in the search box</summary>
+          <ul id="examples" class="examples"></ul>
+          <p class="hint">
+            Combine with a space (and), <code>OR</code>, <code>-</code> (not) and parentheses.
+            Dates can be a weekday, <code>today</code>, <code>yesterday</code>, <code>2026-09-28</code>
+            or how long ago (<code>3d</code>). Durations use <code>h</code>, <code>d</code> or <code>w</code>.
+          </p>
+        </details>
+      </form>
+    </section>
+
+    <section id="welcome" class="welcome" hidden>
+      <h2>No candidates yet</h2>
+      <p>Add your first candidate, or load a set of demo candidates to try the search.</p>
+      <button id="seed-button" class="button" type="button">Load demo candidates</button>
+    </section>
+
+    <section id="board" class="board" aria-label="Pipeline board"></section>
+
+    <section id="results" class="results" aria-label="Search results" aria-live="polite" hidden></section>
+  </main>
+
+  <footer class="footer">
+    <span id="audit" class="audit"></span>
+  </footer>
+
+  <div id="backdrop" class="backdrop" hidden></div>
+  <aside id="panel" class="panel" aria-label="Candidate" hidden></aside>
+
+  <dialog id="add-dialog" class="dialog">
+    <form id="add-form" method="dialog">
+      <h2>Add candidate</h2>
+      <label>Job ID
+        <input id="add-job" name="job_id" required maxlength="40" autocomplete="off" list="job-ids"
+               placeholder="e.g. JOB-001">
+      </label>
+      <datalist id="job-ids"></datalist>
+      <div id="add-job-info" class="job-info" aria-live="polite" hidden></div>
+      <label>Name <input id="add-name" name="name" required maxlength="120" autocomplete="off"></label>
+      <label>Email <input id="add-email" name="email" type="email" required maxlength="254" autocomplete="off"></label>
+      <label>Expected salary per year (optional)
+        <input id="add-salary" name="expected_salary" inputmode="numeric" maxlength="20" autocomplete="off"
+               placeholder="e.g. 2200000">
+      </label>
+      <label>Resume (PDF, up to 5 MB)
+        <input id="add-resume" name="resume" type="file" accept="application/pdf,.pdf" required>
+      </label>
+      <p id="add-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button id="add-cancel" class="button" type="button">Cancel</button>
+        <button id="add-submit" class="button primary" type="submit">Add to Applied</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Recruitly Job Portal</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Recruitly <span>Job portal</span></h1>
+    <nav class="topbar-actions"><a class="button" href="/">Back to candidates</a></nav>
+  </header>
+
+  <main>
+    <form id="job-form">
+      <div class="sheet-wrap">
+        <table class="sheet">
+          <thead>
+            <tr>
+              <th>Job ID</th><th>Title</th><th>Min experience (years)</th><th>Required skills</th>
+              <th>Nice-to-have skills</th><th>Budget min</th><th>Budget max</th><th>Currency</th>
+              <th>Location</th><th>Work mode</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+          <tbody>
+            <tr class="new">
+              <td><input name="id" required placeholder="JOB-002" aria-label="Job ID"></td>
+              <td><input name="title" required aria-label="Title"></td>
+              <td><input name="min_experience_years" required type="number" min="0" step="0.5" aria-label="Min experience"></td>
+              <td><input name="required_skills" required placeholder="comma separated" aria-label="Required skills"></td>
+              <td><input name="nice_to_have_skills" placeholder="comma separated" aria-label="Nice-to-have skills"></td>
+              <td><input name="budget_min" required type="number" min="0" aria-label="Budget min"></td>
+              <td><input name="budget_max" required type="number" min="0" aria-label="Budget max"></td>
+              <td><input name="currency" value="INR" maxlength="3" aria-label="Currency"></td>
+              <td><input name="location" aria-label="Location"></td>
+              <td><input name="work_mode" aria-label="Work mode"></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="sheet-actions">
+        <button class="button primary" type="submit">Add job</button>
+        <span id="message" role="status"></span>
+      </div>
+    </form>
+  </main>
+
+  <script>
+    "use strict";
+    const rows = document.getElementById("rows");
+    const message = document.getElementById("message");
+    const list = (text) => text.split(",").map((part) => part.trim()).filter(Boolean);
+
+    function cell(text) {
+      const td = document.createElement("td");
+      td.textContent = text;
+      return td;
+    }
+
+    async function load() {
+      const jobs = await (await fetch("/api/jobs")).json();
+      rows.replaceChildren(...jobs.map((job) => {
+        const tr = document.createElement("tr");
+        tr.append(...[job.id, job.title, job.min_experience_years, job.required_skills.join(", "),
+          job.nice_to_have_skills.join(", "), job.budget_min, job.budget_max, job.currency, job.location,
+          job.work_mode].map(cell));
+        return tr;
+      }));
+    }
+
+    document.getElementById("job-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.target);
+      const body = {
+        id: form.get("id").trim(),
+        title: form.get("title"),
+        min_experience_years: Number(form.get("min_experience_years")),
+        required_skills: list(form.get("required_skills")),
+        nice_to_have_skills: list(form.get("nice_to_have_skills")),
+        budget_min: Number(form.get("budget_min")),
+        budget_max: Number(form.get("budget_max")),
+        currency: form.get("currency").trim() || "INR",
+        location: form.get("location"),
+        work_mode: form.get("work_mode"),
+      };
+      const response = await fetch("/api/jobs", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const result = await response.json().catch(() => ({}));
+      message.className = response.ok ? "muted" : "form-error";
+      message.textContent = response.ok ? `Added ${result.id}.` : (result.message || "Couldn't add the job.");
+      if (response.ok) {
+        event.target.reset();
+        load();
+      }
+    });
+
+    load();
+  </script>
+</body>
+</html>

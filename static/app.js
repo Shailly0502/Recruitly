@@ -64,12 +64,15 @@ function duration(seconds) {
 }
 
 function dateTime(iso) {
-  return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return new Date(iso).toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit",
+  }) + " IST";
 }
 
 function money(amount, currency) {
-  const figure = new Intl.NumberFormat(currency === "INR" ? "en-IN" : undefined).format(amount);
-  return currency === "INR" ? `₹${figure}` : `${currency} ${figure}`;
+  if (currency !== "INR") return `${currency} ${new Intl.NumberFormat().format(amount)}`;
+  const lakhs = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(amount / 100000);
+  return `₹${new Intl.NumberFormat("en-IN").format(amount)} (${lakhs} LPA)`;
 }
 
 const isFinal = (candidate) => candidate.actions.length === 0;
@@ -143,7 +146,7 @@ async function runSearch() {
     $("board").hidden = false;
     return;
   }
-  const params = new URLSearchParams({ q: query, tz_offset: new Date().getTimezoneOffset() });
+  const params = new URLSearchParams({ q: query });
   try {
     const found = await api(`/api/search?${params}`);
     if (run !== state.searchRun) return; // a newer search has started
@@ -163,7 +166,7 @@ async function runAssist() {
   showAssist(el("span", { class: "muted" }, "Working out what you meant…"));
   let answer;
   try {
-    answer = await api("/api/assist", { method: "POST", body: { text, tz_offset: new Date().getTimezoneOffset() } });
+    answer = await api("/api/assist", { method: "POST", body: { text } });
   } catch {
     return runSearch(); // fall back to plain search
   }
@@ -522,7 +525,7 @@ function jobSection(candidate) {
         row("Nice to have", skills(job.nice_to_have_skills),
           facts ? `${job.nice_to_have_skills.filter(has).length} of ${job.nice_to_have_skills.length} found by name` : "—"),
         row("Experience", `${job.min_experience_years}+ years`, years.join("; ") || "—"),
-        row("Budget per year", `${money(job.budget_min, job.currency)} to ${money(job.budget_max, job.currency)}`,
+        row("Budget (CTC p.a.)", `${money(job.budget_min, job.currency)} to ${money(job.budget_max, job.currency)}`,
           candidate.expected_salary ? `Expects ${money(candidate.expected_salary, job.currency)}` : "Not given"),
         row("Location", [job.location, job.work_mode].filter(Boolean).join(" · ") || "—", "—")))));
 }
@@ -589,7 +592,7 @@ async function showJobInfo() {
       el("div", {}, `${job.min_experience_years}+ years · ${job.location} · ${job.work_mode}`),
       el("div", {}, `Required: ${job.required_skills.join(", ")}`),
       el("div", {}, `Nice to have: ${job.nice_to_have_skills.join(", ")}`),
-      el("div", {}, `Budget: ${money(job.budget_min, job.currency)} to ${money(job.budget_max, job.currency)} per year`));
+      el("div", {}, `Budget: ${money(job.budget_min, job.currency)} to ${money(job.budget_max, job.currency)} per annum`));
   } catch (error) {
     if ($("add-job").value.trim() !== id) return;
     box.className = "job-info form-error";

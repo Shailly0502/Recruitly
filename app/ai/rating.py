@@ -6,6 +6,7 @@ import threading
 from datetime import datetime
 
 from .. import pipeline
+from ..config import IST
 from ..jobs import Job
 from ..resumes import ResumeStorage
 from ..store import Candidate, Store, utcnow
@@ -44,9 +45,9 @@ class RatingTracker:
 # ---- no AI ------------------------------------
 
 def budget_fit(expected_salary: int | None, job: Job) -> dict:
-    """Expected salary vs budget, scored 1 to 5."""
+    """Expected CTC vs budget, scored 1 to 5."""
     if expected_salary is None:
-        return {"score": None, "rated_by": "code", "detail": "No expected salary given"}
+        return {"score": None, "rated_by": "code", "detail": "No expected CTC given"}
     midpoint = (job.budget_min + job.budget_max) / 2
     if expected_salary <= midpoint:
         score, detail = 5, "At or below the budget midpoint"
@@ -140,7 +141,7 @@ def rate_candidate(store: Store, storage: ResumeStorage, ai: AI, tracker: Rating
             return
         try:
             job = store.job(candidate.job_id)
-            rating = rate(ai, job, storage.text(candidate.resume["sha256"]), candidate.expected_salary, utcnow())
+            rating = rate(ai, job, storage.text(candidate.resume["sha256"]), candidate.expected_salary, utcnow().astimezone(IST))
         except deepseek.DeepSeekError as error:
             rating = {"status": FAILED, "message": "The AI did not return usable facts from the resume.",
                       "reason": str(error)}

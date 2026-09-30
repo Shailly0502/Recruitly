@@ -68,7 +68,7 @@ Plain words search names, and typos are fine. Everything else is a filter.
 | Combined | `(stage:interview OR stage:offer) priya` |
 
 - Terms are combined with a space (AND), `OR`, `-` or `NOT`, and parentheses.
-- Dates: `today`, `yesterday`, a weekday, `2026-09-28`, or a relative time like `3d`.
+- Dates: `today`, `yesterday`, a weekday, `28-09-2026` (or `28/09/2026`, `2026-09-28`), or a relative time like `3d`.
 - Durations: `12h`, `7d`, `2w`.
 
 If you'd rather not type filters, **Apply Filters** has dropdowns that build the query for you.
@@ -98,7 +98,7 @@ Normal queries and name searches never go through this and run as you type.
 Click **Create candidate rating** on a candidate's profile. A spinner shows while it runs, then you get:
 
 - **Skills, Experience and Role relevance**, each out of 5, scored by Jev from facts DeepSeek extracted from the resume
-- **Budget fit** out of 5, from the expected salary against the job's budget
+- **Budget fit** out of 5, from the expected CTC against the job's budget
 - **An overall score** out of 10: `2 × (0.35·skills + 0.30·experience + 0.20·relevance + 0.15·budget)`
 
 Every extracted fact has to come with a quote that actually appears in the resume, otherwise it's thrown out. Jev only ever sees the job requirements and those verified facts, never the candidate's name or contact details. A rating never moves a candidate. It's saved to the history like any other event, and scores Jev was unsure about are flagged "needs review".
@@ -158,7 +158,7 @@ Errors always come back as `{error, message, position}` with a 400, 404 or 409. 
 
 **Swapped letters count as one typo.** "sharam" vs "sharma" is one transposition. Plain Levenshtein counts that as two edits, while optimal string alignment counts it as one. Words of three letters or fewer have to match exactly.
 
-**"Monday" means your Monday.** The browser sends its timezone offset, so date filters don't shift at UTC midnight.
+**Built for India.** All times are IST, so "since Monday" means Monday 00:00 IST. Dates are shown and accepted day-first, and money is in rupees with lakh grouping (₹24,00,000) and LPA.
 
 **Keep it simple.** Search runs in memory, which is plenty for one company's candidates, and the frontend is plain static files.
 

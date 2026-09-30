@@ -32,7 +32,7 @@ UNIT_SECONDS = {
 }
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 DURATION_HELP = "Use a number and a unit, like 12h, 7d or 2w."
-DATE_HELP = "Use a weekday (monday), today, yesterday, a date (2026-09-28) or how long ago (3d)."
+DATE_HELP = "Use a weekday (monday), today, yesterday, a date (28-09-2026) or how long ago (3d)."
 
 
 @dataclass(frozen=True)
@@ -290,9 +290,11 @@ class _Parser:
             if len(weekdays) == 1:
                 # The most recent one, counting today.
                 day = today - timedelta(days=(today.weekday() - WEEKDAYS.index(weekdays[0])) % 7)
-            elif re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            elif re.fullmatch(r"\d{4}-\d{2}-\d{2}|\d{2}[-/]\d{2}[-/]\d{4}", text):
+                # 2026-09-28, or day first: 28-09-2026 / 28/09/2026.
+                layout = "%Y-%m-%d" if text[4] == "-" else "%d-%m-%Y"
                 try:
-                    day = datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=self.now.tzinfo)
+                    day = datetime.strptime(text.replace("/", "-"), layout).replace(tzinfo=self.now.tzinfo)
                 except ValueError:
                     raise QueryError(f"'{text}' isn't a real date.", position) from None
         if day is not None:

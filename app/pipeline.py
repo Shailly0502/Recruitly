@@ -35,7 +35,7 @@ def add_candidate(store: Store, name: str, email: str, job_id: str, resume: Resu
     if "@" not in email or email.startswith("@") or email.endswith("@"):
         raise InvalidInput("Enter a valid email address.")
     if expected_salary is not None and expected_salary <= 0:
-        raise InvalidInput("Expected salary must be more than zero.")
+        raise InvalidInput("Expected CTC must be more than zero.")
 
     with store.transaction() as tx:
         job = tx.job(job_id)

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-IN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -19,7 +19,7 @@
           <thead>
             <tr>
               <th>Job ID</th><th>Title</th><th>Min experience (years)</th><th>Required skills</th>
-              <th>Nice-to-have skills</th><th>Budget min</th><th>Budget max</th><th>Currency</th>
+              <th>Nice-to-have skills</th><th>Budget min (₹ p.a.)</th><th>Budget max (₹ p.a.)</th><th>Currency</th>
               <th>Location</th><th>Work mode</th>
             </tr>
           </thead>
@@ -52,6 +52,7 @@
     const rows = document.getElementById("rows");
     const message = document.getElementById("message");
     const list = (text) => text.split(",").map((part) => part.trim()).filter(Boolean);
+    const rupees = (amount) => new Intl.NumberFormat("en-IN").format(amount);
 
     function cell(text) {
       const td = document.createElement("td");
@@ -64,7 +65,7 @@
       rows.replaceChildren(...jobs.map((job) => {
         const tr = document.createElement("tr");
         tr.append(...[job.id, job.title, job.min_experience_years, job.required_skills.join(", "),
-          job.nice_to_have_skills.join(", "), job.budget_min, job.budget_max, job.currency, job.location,
+          job.nice_to_have_skills.join(", "), rupees(job.budget_min), rupees(job.budget_max), job.currency, job.location,
           job.work_mode].map(cell));
         return tr;
       }));

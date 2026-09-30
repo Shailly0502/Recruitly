@@ -31,7 +31,7 @@ EXPECTED = {
     "Daniel Thomas": (2, 4, 4),
 }
 CATEGORIES = ("skills", "experience", "relevance")
-OTHER_NAME = "Alex Morgan"
+OTHER_NAME = "Amit Joshi"
 
 
 def resume_text(name: str, resume: dict) -> str:

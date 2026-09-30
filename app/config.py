@@ -2,9 +2,13 @@
 
 import os
 from dataclasses import dataclass
+from datetime import timedelta, timezone
 from pathlib import Path
 
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+
+# All dates are shown and interpreted in Indian Standard Time.
+IST = timezone(timedelta(hours=5, minutes=30), "IST")
 
 
 @dataclass(frozen=True)

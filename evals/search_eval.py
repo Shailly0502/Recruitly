@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 
 from app import seed
+from app.config import IST
 from app.ai import assist, questions
 from app.resumes import ResumeStorage
 from app.search import parser, run
@@ -43,7 +44,7 @@ QUESTIONS = [
     ("who got to offer in the last 7 days", "reached:offer>=7d"),
     ("everyone who applied for JOB-001", "job:JOB-001"),
     ("JOB-001 applicants currently in screening", "job:JOB-001 stage:screening"),
-    ("who was hired since 2026-09-01", "reached:hired>=2026-09-01"),
+    ("who was hired since 01-09-2026", "reached:hired>=01-09-2026"),
     ("who is not in screening or interview", "-stage:screening -stage:interview"),
     ("rejected candidates who had reached interview", "stage:rejected reached:interview"),
     ("who moved to screening since friday", "reached:screening>=friday"),
@@ -54,7 +55,7 @@ def main() -> None:
     ai = real_ai()
     folder = Path(tempfile.mkdtemp())
     store = Store(folder / "eval.db")
-    now = utcnow().astimezone()
+    now = utcnow().astimezone(IST)
     seed.seed(store, ResumeStorage(folder / "resumes"), now)
     candidates = store.candidates()
 

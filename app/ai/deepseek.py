@@ -58,7 +58,7 @@ Syntax:
 
 DURATION is a number and a unit with no space: 12h, 7d, 2w.
 DATE is one of: today, yesterday, a weekday name (the most recent one, counting today),
-a date as YYYY-MM-DD, or a DURATION meaning that long ago (reached:offer>=30d).
+a date as DD-MM-YYYY, or a DURATION meaning that long ago (reached:offer>=30d).
 There are no spaces inside a term.
 
 Examples:
@@ -77,7 +77,7 @@ If the question cannot be expressed in this syntax, reply with exactly {UNSUPPOR
 
 def translate(client, question: str, today: datetime, failed: tuple[str, str] | None = None) -> str:
     """`failed` is (query, parser error) from the previous attempt."""
-    user = f"Today is {today:%A %Y-%m-%d}.\nQuestion: {question}"
+    user = f"Today is {today:%A %d-%m-%Y} (IST).\nQuestion: {question}"
     if failed:
         user += (f"\n\nYour previous answer was: {failed[0]}\n"
                  f"The portal rejected it: {failed[1]}\nReply with a corrected query string only.")

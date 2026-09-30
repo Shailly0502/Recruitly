@@ -30,8 +30,8 @@ def _error(status: int, error: str, message: str, position: int | None = None) -
 
 
 def _local(now: datetime, tz_offset: int | None) -> datetime:
-    """Recruiter's local time, for "monday" and "today"."""
-    return now.astimezone() if tz_offset is None else now.astimezone(timezone(timedelta(minutes=-tz_offset)))
+    """Time used for "monday" and "today": IST unless an offset is given."""
+    return now.astimezone(config.IST if tz_offset is None else timezone(timedelta(minutes=-tz_offset)))
 
 
 def _skills(names: list[str]) -> tuple[str, ...]:
@@ -127,7 +127,7 @@ def create_app(db_path: str | Path | None = None, ai: ai_layer.AI | None = None)
         name: str = Form(max_length=120),
         email: str = Form(max_length=254),
         job_id: str = Form(max_length=40),
-        expected_salary: str = Form(default="", max_length=20, description="Per year, in the job's currency. Optional."),
+        expected_salary: str = Form(default="", max_length=20, description="Expected CTC per annum, in the job's currency. Optional."),
         resume: UploadFile | None = File(default=None, description="The resume, as a PDF. Required."),
     ):
         if resume is None:
@@ -136,7 +136,7 @@ def create_app(db_path: str | Path | None = None, ai: ai_layer.AI | None = None)
         if expected_salary.strip():
             digits = expected_salary.replace(",", "").strip()
             if not digits.isdigit():
-                raise pipeline.InvalidInput("Expected salary must be a whole number, like 2200000.")
+                raise pipeline.InvalidInput("Expected CTC must be a whole number of rupees, like 2200000 or 22,00,000.")
             salary = int(digits)
         if store.job(job_id) is None:  # fail before saving the file
             raise pipeline.InvalidInput(f"No job with ID '{job_id.strip()}'.")
@@ -222,7 +222,7 @@ def create_app(db_path: str | Path | None = None, ai: ai_layer.AI | None = None)
         tz_offset: int | None = Query(
             default=None, ge=-900, le=900,
             description="Minutes behind UTC, as JavaScript's getTimezoneOffset() reports it. "
-                        "Decides when 'monday' and 'today' begin. Defaults to the server's time zone.",
+                        "Decides when 'monday' and 'today' begin. Defaults to IST.",
         ),
     ):
         now = utcnow()

@@ -92,7 +92,7 @@ The FastAPI server also serves the frontend from `static/`.
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
 | GET | `/api/candidates` | Board data: every candidate, current stage, time in stage |
-| POST | `/api/candidates` | Add an application. Multipart: name, email, job ID, expected salary (optional), resume PDF (required) |
+| POST | `/api/candidates` | Add an application. Multipart: name, email, job ID, expected CTC (optional), resume PDF (required) |
 | GET | `/api/candidates/{id}` | Stage, time in stage, job, resume details, rating, full history |
 | POST | `/api/candidates/{id}/advance` | Move forward one stage `{expected_stage}` |
 | POST | `/api/candidates/{id}/reject` | Reject `{expected_stage, reason}` |
@@ -151,7 +151,7 @@ Bare words search names with typo tolerance; other terms are filters. Terms comb
 | Applicants for one job | `job:JOB-001` |
 | Combined example | `(stage:interview OR stage:offer) priya` |
 
-Fields: `stage:` (current stage; an unambiguous prefix such as `stage:int` is accepted), `for:` (time in current stage, with `>`, `>=`, `<`, `<=`), `reached:` (entered a stage, optionally compared with a date), `job:` (job applied for), `name:` (a name that looks like a keyword). Quoted phrases search each word as a name. Dates can be `today`, `yesterday`, a weekday (the most recent one, counting today), `YYYY-MM-DD`, or how long ago (`3d`). Durations use `h`, `d` or `w`. "Monday" and "today" are resolved in the recruiter's time zone, sent by the browser.
+Fields: `stage:` (current stage; an unambiguous prefix such as `stage:int` is accepted), `for:` (time in current stage, with `>`, `>=`, `<`, `<=`), `reached:` (entered a stage, optionally compared with a date), `job:` (job applied for), `name:` (a name that looks like a keyword). Quoted phrases search each word as a name. Dates can be `today`, `yesterday`, a weekday (the most recent one, counting today), `DD-MM-YYYY` or `DD/MM/YYYY` (or `YYYY-MM-DD`), or how long ago (`3d`). Durations use `h`, `d` or `w`. "Monday" and "today" are resolved in IST.
 
 - **Fuzzy matching:** optimal string alignment distance, which counts swapped adjacent letters as one typo, so "sharam" is one step from "sharma". Words of up to 3 letters must match exactly, 4 to 7 letters allow one typo, 8 or more allow two. Exact and prefix matches score highest.
 - **Ranking:** name similarity first. For filter-only searches, the most relevant signal: the most recent move for a dated `reached:` filter, otherwise the longest time in the current stage.
@@ -191,12 +191,12 @@ Rating a candidate needs something to rate against, so every application is link
 | Minimum experience | 3 years |
 | Required skills | Python, FastAPI, SQL, REST API design |
 | Nice-to-have skills | Docker, AWS, Redis |
-| Budget | ₹18,00,000 to ₹26,00,000 per year |
+| Budget (CTC per annum) | ₹18,00,000 to ₹26,00,000 (18 to 26 LPA) |
 | Location / work mode | Lucknow · Hybrid |
 
 **Application**
 
-- Name, email, job ID applied for, expected salary (optional; needed for the budget rating, since resumes rarely include it), and a resume PDF (required, up to 5 MB and 10 pages).
+- Name, email, job ID applied for, expected CTC (optional; needed for the budget rating, since resumes rarely include it), and a resume PDF (required, up to 5 MB and 10 pages).
 - The recruiter types the job ID; the portal fetches that job from the database and shows its requirements before saving.
 - All recorded in the application (`added`) event, including the resume's SHA-256 hash.
 
@@ -252,14 +252,14 @@ Each application is rated against its job's requirements: three categories score
 
 ```mermaid
 flowchart TD
-    U["Application submitted<br/>resume PDF + job ID + expected salary"] --> RR["Read resume<br/>extract text, render page images"]
+    U["Application submitted<br/>resume PDF + job ID + expected CTC"] --> RR["Read resume<br/>extract text, render page images"]
     RR -- images --> VW["Resume viewer<br/>page images only"]
     B["Recruiter clicks<br/>Create candidate rating"] --> X["DeepSeek extracts facts<br/>skills, roles, years + quotes"]
     RR -. "stored text" .-> X
     X --> EV{"Verify evidence<br/>each quote must be in the resume"}
     EV -- "not found" --> DR["Unverified facts dropped<br/>listed on the card"]
     EV -- "facts only, no personal details" --> JS["Jev Score × 3<br/>skills · experience · relevance"]
-    BF["Budget fit<br/>salary vs range (code)"] --> OV["Overall rating / 10<br/>weighted average (code)"]
+    BF["Budget fit<br/>expected CTC vs range (code)"] --> OV["Overall rating / 10<br/>weighted average (code)"]
     JS --> OV
     OV -- "confidence below 0.5" --> NR["Needs review flag"]
     OV --> SV["Saved to the audit trail, shown on the profile<br/>advisory only: she decides every move"]
@@ -270,7 +270,7 @@ flowchart TD
 - **DeepSeek extracts facts, not opinions.** From the resume text it returns structured JSON: skills found, past roles with dates, stated years of experience, each with a short quote from the resume as evidence. It does not rate anything. Invalid JSON gets one retry.
 - **Our code verifies the evidence.** Every quote must actually appear in the resume text (ignoring case, spacing and typographic quotes). Facts without a matching quote are dropped, so an invented skill can't raise a rating. Our code also computes years of experience from the verified role dates, merging overlaps, so the number doesn't depend on a model's arithmetic.
 - **Jev rates each category.** Jev's Score type rates a state against ordered rubric levels and returns a probability-weighted position with a confidence value; the code maps its five levels to 1 to 5. All three categories are asked in one request. Jev sees the job requirements and the verified facts only.
-- **Budget fit is plain arithmetic.** Expected salary against the budget range needs no AI.
+- **Budget fit is plain arithmetic.** Expected CTC against the budget range needs no AI.
 - **Our code computes the overall rating.** A fixed, visible formula, not a model's opinion.
 
 ### Categories and rubrics (each out of 5)
@@ -289,7 +289,7 @@ The full rubric wording lives in `app/ai/questions.py`. Levels 1, 3 and 5 follow
 ```
 overall = 2 × (0.35·skills + 0.30·experience + 0.20·relevance + 0.15·budget)
 # shown to one decimal, e.g. 7.4 / 10
-# if a category can't be rated (e.g. no expected salary), it is left out and the
+# if a category can't be rated (e.g. no expected CTC), it is left out and the
 # remaining weights are rescaled; the card says which category is missing
 ```
 
@@ -325,7 +325,7 @@ Following TypeSafe's guidance, every Jev question, option list, rubric and thres
 | Resume is a scanned image with no text | "Couldn't read text from this resume; rating unavailable"; the resume can still be viewed |
 | DeepSeek returns invalid JSON twice, or doesn't answer | "Rating failed: …" with the **Create candidate rating** button to try again |
 | Jev doesn't answer, or its reply is incomplete | "Rating failed: The scoring service did not answer." with the button to try again |
-| No expected salary given | Budget fit shown as "Not rated"; the overall uses the other categories |
+| No expected CTC given | Budget fit shown as "Not rated"; the overall uses the other categories |
 | Jev unsure on a category | Score shown with a "needs review" flag |
 | Search AI times out or errors | The normal parser error or name search for her input; the page never blocks |
 | Low-confidence search translation | The query shown as a suggestion to run or edit |
